@@ -1,0 +1,33 @@
+# OS files
+.DS_Store
+Thumbs.db
+*.zip
+
+# Linux
+*.swp
+*.swo
+*~
+.directory
+
+# KDE/Kate
+.kate-swp
+.kateproject
+.kateproject.local
+
+# IDE/Editor files
+.vscode/
+.idea/
+
+# Environment files
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Offline
+.obsidian
+ROADMAP.md
+local
+trash
