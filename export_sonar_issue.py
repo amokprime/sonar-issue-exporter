@@ -25,7 +25,7 @@ import re
 import html as html_mod
 import requests
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional, Tuple
 from urllib.parse import urlparse, parse_qs
 
 # Try to use html2text for better Markdown conversion; fall back to simple stripping.
@@ -64,15 +64,28 @@ def load_env(env_path: Path = Path(".env")):
 
 def find_env_file() -> Optional[Path]:
     """Find the .env file, checking the current directory first, then the script's directory."""
-    # Current working directory takes priority (more intuitive for CLI usage)
     cwd_env = Path.cwd() / ".env"
     if cwd_env.exists():
         return cwd_env
-    # Fallback: same directory as this script (for double-click / clone usage)
     script_env = Path(__file__).parent / ".env"
     if script_env.exists():
         return script_env
     return None
+
+
+def load_config() -> str:
+    """Load .env and return the BEARER_TOKEN. Exits on failure."""
+    env_file = find_env_file()
+    if env_file:
+        load_env(env_file)
+    else:
+        print("Note: no .env file found in current directory or script directory.", file=sys.stderr)
+
+    token = os.getenv("BEARER_TOKEN")
+    if not token:
+        print("ERROR: BEARER_TOKEN not set. Add it to .env or set the environment variable.", file=sys.stderr)
+        sys.exit(1)
+    return token
 
 
 # --- Helper: API call --------------------------------------------------------
@@ -110,6 +123,17 @@ def sanitise_folder_name(raw: str, max_len: int = 80) -> str:
     return name or "issue"
 
 
+def create_unique_folder(base_name: str) -> Path:
+    """Create a new folder, appending _1, _2, ... if the name already exists."""
+    folder = Path(base_name)
+    counter = 1
+    while folder.exists():
+        folder = Path(f"{base_name}_{counter}")
+        counter += 1
+    folder.mkdir(parents=True, exist_ok=False)
+    return folder
+
+
 # --- File writing ------------------------------------------------------------
 def write_file(folder: Path, filename: str, content: str, tab_label: str = "") -> bool:
     """Write content to file. Skip if content is empty/whitespace-only."""
@@ -124,52 +148,46 @@ def write_file(folder: Path, filename: str, content: str, tab_label: str = "") -
     return True
 
 
-# --- Main --------------------------------------------------------------------
-def main():
-    # Load .env (current directory first, then script directory)
-    env_file = find_env_file()
-    if env_file:
-        load_env(env_file)
-    else:
-        print("Note: no .env file found in current directory or script directory.", file=sys.stderr)
-
-    token = os.getenv("BEARER_TOKEN")
-    if not token:
-        print("ERROR: BEARER_TOKEN not set. Add it to .env or set the environment variable.", file=sys.stderr)
-        sys.exit(1)
-
-    # --- Parse URL (from command line, env, or .env) -------------------------
-    raw_url = None
-    if len(sys.argv) > 1:
-        raw_url = sys.argv[1]
-    else:
-        raw_url = os.getenv("RAW_URL")
-
-    if not raw_url:
-        print("ERROR: provide a SonarCloud issue URL as an argument, or set RAW_URL in .env.", file=sys.stderr)
-        sys.exit(1)
-
+# --- URL parsing -------------------------------------------------------------
+def parse_issue_url(raw_url: str) -> Tuple[str, str, Optional[str], Optional[str]]:
+    """Parse a SonarCloud URL into (component_key, issue_key, pull_request, branch)."""
     parsed = urlparse(raw_url)
     qs = parse_qs(parsed.query)
 
     component_key = qs.get("id", [None])[0]
     issue_key     = qs.get("open", [None])[0]
-    pull_request  = qs.get("pullRequest", [None])[0]   # e.g. "5"
-    branch        = qs.get("branch", [None])[0]         # e.g. "feature/foo"
+    pull_request  = qs.get("pullRequest", [None])[0]
+    branch        = qs.get("branch", [None])[0]
 
-    if not component_key or not issue_key:
-        print("ERROR: URL must contain 'id' and 'open' parameters.", file=sys.stderr)
+    return component_key, issue_key, pull_request, branch
+
+
+def resolve_url() -> str:
+    """Get the SonarCloud URL from CLI args or RAW_URL env var. Exits on failure."""
+    if len(sys.argv) > 1:
+        return sys.argv[1]
+    raw_url = os.getenv("RAW_URL")
+    if not raw_url:
+        print("ERROR: provide a SonarCloud issue URL as an argument, or set RAW_URL in .env.", file=sys.stderr)
         sys.exit(1)
+    return raw_url
 
-    print(f"Component : {component_key}")
-    print(f"Issue     : {issue_key}")
-    if pull_request:
-        print(f"PR        : {pull_request}")
-    if branch:
-        print(f"Branch    : {branch}")
 
-    # --- 1. "Where" - fetch the issue and clean it ---------------------------
-    print("Fetching issue details ...")
+# --- Issue fetching ----------------------------------------------------------
+KEEP_FIELDS = {
+    "rule", "severity", "type", "component", "line", "textRange",
+    "message", "flows", "impacts", "cleanCodeAttribute", "cleanCodeAttributeCategory"
+}
+
+
+def fetch_issue(component_key: str, issue_key: str, token: str,
+                pull_request: Optional[str] = None,
+                branch: Optional[str] = None) -> Dict:
+    """Fetch an issue from SonarCloud and return the cleaned issue dict.
+
+    Also returns rule_key, organization, and issue_message via the dict.
+    Exits on failure.
+    """
     search_params = {
         "issues": issue_key,
         "componentKeys": component_key,
@@ -187,66 +205,54 @@ def main():
 
     issue = issues[0]
     rule_key = issue.get("rule")
-    organization = issue.get("organization")   # Required by rules/show
-    issue_message = issue.get("message", "unknown_issue")
-
     if not rule_key:
         print("ERROR: rule key missing from issue.", file=sys.stderr)
         sys.exit(1)
 
-    # Clean the issue (keep only diagnostic fields)
-    KEEP_FIELDS = {
-        "rule", "severity", "type", "component", "line", "textRange",
-        "message", "flows", "impacts", "cleanCodeAttribute", "cleanCodeAttributeCategory"
-    }
     clean_issue = {k: issue[k] for k in KEEP_FIELDS if k in issue}
+    clean_issue["_rule_key"] = rule_key
+    clean_issue["_organization"] = issue.get("organization", "")
+    clean_issue["_message"] = issue.get("message", "unknown_issue")
+    return clean_issue
 
-    # --- 2. "Why" and "How" - fetch rule details -----------------------------
-    print(f"Fetching rule details for {rule_key} (org: {organization}) ...")
+
+# --- Rule description parsing ------------------------------------------------
+def extract_rule_descriptions(rule: dict) -> Tuple[str, str]:
+    """Extract the 'why' and 'how' HTML content from a rule dict.
+
+    Returns (why_html, how_html).
+    """
+    sections = {s["key"]: s["content"] for s in rule.get("descriptionSections", [])}
+
+    if sections:
+        intro = sections.get("introduction", "")
+        root  = sections.get("root_cause", "")
+        why_html = f"{intro}\n\n{root}".strip()
+        how_html = sections.get("how_to_fix", "")
+
+        if not why_html:
+            why_html = rule.get("htmlDesc") or rule.get("mdDesc") or ""
+    else:
+        why_html = rule.get("htmlDesc") or rule.get("mdDesc") or ""
+        how_html = ""
+
+    return why_html, how_html
+
+
+def fetch_rule_details(rule_key: str, organization: str, token: str) -> Tuple[str, str]:
+    """Fetch rule details and return (why_md, how_md)."""
     rule_data = api_get("rules/show", {
         "key": rule_key,
         "organization": organization,
     }, token)
     rule = rule_data.get("rule", {})
+    why_html, how_html = extract_rule_descriptions(rule)
+    return html_to_md(why_html), html_to_md(how_html)
 
-    # SonarCloud now structures rule descriptions into sections that match the UI tabs.
-    sections = {s["key"]: s["content"] for s in rule.get("descriptionSections", [])}
 
-    if sections:
-        # "Why is this an issue?" tab = introduction + root_cause
-        intro = sections.get("introduction", "")
-        root  = sections.get("root_cause", "")
-        why_html = f"{intro}\n\n{root}".strip()
-
-        # "How can I fix it?" tab = how_to_fix
-        how_html = sections.get("how_to_fix", "")
-
-        # If neither introduction nor root_cause exist, fall back to htmlDesc/mdDesc
-        if not why_html:
-            why_html = rule.get("htmlDesc") or rule.get("mdDesc") or ""
-    else:
-        # Fallback for older rules that only have a single htmlDesc / mdDesc field
-        why_html = rule.get("htmlDesc") or rule.get("mdDesc") or ""
-        how_html = ""
-
-    # Convert HTML to Markdown
-    why_md = html_to_md(why_html)
-    how_md = html_to_md(how_html)
-
-    # --- 3. Create a sanitised output folder ----------------------------------
-    base_name = sanitise_folder_name(issue_message)
-    folder = Path(base_name)
-
-    # If folder exists, append _1, _2, ...
-    counter = 1
-    while folder.exists():
-        folder = Path(f"{base_name}_{counter}")
-        counter += 1
-
-    folder.mkdir(parents=True, exist_ok=False)
-    print(f"\nOutput folder -> {folder}")
-
-    # Write files inside the new folder
+# --- Export ------------------------------------------------------------------
+def export_results(folder: Path, clean_issue: Dict, why_md: str, how_md: str):
+    """Write the three output files and print a summary."""
     written = []
     skipped = []
     for fname, fcontent, flabel in [
@@ -265,6 +271,39 @@ def main():
         print("(These tabs don't have content for this issue on SonarCloud.)")
     else:
         print(f"\nAll three tabs exported successfully to {folder}/")
+
+
+# --- Main --------------------------------------------------------------------
+def main():
+    token = load_config()
+    raw_url = resolve_url()
+
+    component_key, issue_key, pull_request, branch = parse_issue_url(raw_url)
+    if not component_key or not issue_key:
+        print("ERROR: URL must contain 'id' and 'open' parameters.", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Component : {component_key}")
+    print(f"Issue     : {issue_key}")
+    if pull_request:
+        print(f"PR        : {pull_request}")
+    if branch:
+        print(f"Branch    : {branch}")
+
+    print("Fetching issue details ...")
+    clean_issue = fetch_issue(component_key, issue_key, token, pull_request, branch)
+    rule_key = clean_issue.pop("_rule_key")
+    organization = clean_issue.pop("_organization")
+    issue_message = clean_issue.pop("_message")
+
+    print(f"Fetching rule details for {rule_key} (org: {organization}) ...")
+    why_md, how_md = fetch_rule_details(rule_key, organization, token)
+
+    base_name = sanitise_folder_name(issue_message)
+    folder = create_unique_folder(base_name)
+    print(f"\nOutput folder -> {folder}")
+
+    export_results(folder, clean_issue, why_md, how_md)
 
 
 if __name__ == "__main__":
