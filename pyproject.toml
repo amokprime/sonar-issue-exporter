@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "sonar-issue-exporter"
 version = "0.2.0"
@@ -16,3 +20,6 @@ markdown = ["html2text"]
 [project.scripts]
 sonar-export = "export_sonar_issue:main"
 sonar-watch = "watch_clipboard:main"
+
+[tool.setuptools]
+py-modules = ["export_sonar_issue", "watch_clipboard"]
