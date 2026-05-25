@@ -1,0 +1,374 @@
+{
+  "rule": "python:S3776",
+  "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+  "line": 128,
+  "textRange": {
+    "startLine": 128,
+    "endLine": 128,
+    "startOffset": 4,
+    "endOffset": 8
+  },
+  "message": "Refactor this function to reduce its Cognitive Complexity from 27 to the 15 allowed.",
+  "severity": "CRITICAL",
+  "type": "CODE_SMELL",
+  "cleanCodeAttribute": "FOCUSED",
+  "cleanCodeAttributeCategory": "ADAPTABLE",
+  "impacts": [
+    {
+      "softwareQuality": "MAINTAINABILITY",
+      "severity": "HIGH"
+    }
+  ],
+  "flows": [
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 131,
+            "endLine": 131,
+            "startOffset": 4,
+            "endOffset": 6
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 133,
+            "endLine": 133,
+            "startOffset": 4,
+            "endOffset": 8
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 137,
+            "endLine": 137,
+            "startOffset": 4,
+            "endOffset": 6
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 143,
+            "endLine": 143,
+            "startOffset": 4,
+            "endOffset": 6
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 145,
+            "endLine": 145,
+            "startOffset": 4,
+            "endOffset": 8
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 148,
+            "endLine": 148,
+            "startOffset": 4,
+            "endOffset": 6
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 160,
+            "endLine": 160,
+            "startOffset": 4,
+            "endOffset": 6
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 160,
+            "endLine": 160,
+            "startOffset": 25,
+            "endOffset": 27
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 166,
+            "endLine": 166,
+            "startOffset": 4,
+            "endOffset": 6
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 168,
+            "endLine": 168,
+            "startOffset": 4,
+            "endOffset": 6
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 177,
+            "endLine": 177,
+            "startOffset": 4,
+            "endOffset": 6
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 179,
+            "endLine": 179,
+            "startOffset": 4,
+            "endOffset": 6
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 184,
+            "endLine": 184,
+            "startOffset": 4,
+            "endOffset": 6
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 193,
+            "endLine": 193,
+            "startOffset": 4,
+            "endOffset": 6
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 215,
+            "endLine": 215,
+            "startOffset": 4,
+            "endOffset": 6
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 225,
+            "endLine": 225,
+            "startOffset": 8,
+            "endOffset": 10
+          },
+          "msg": "+2 (incl 1 for nesting)"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 226,
+            "endLine": 226,
+            "startOffset": 66,
+            "endOffset": 68
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 227,
+            "endLine": 227,
+            "startOffset": 4,
+            "endOffset": 8
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 229,
+            "endLine": 229,
+            "startOffset": 62,
+            "endOffset": 64
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 242,
+            "endLine": 242,
+            "startOffset": 4,
+            "endOffset": 9
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 252,
+            "endLine": 252,
+            "startOffset": 4,
+            "endOffset": 7
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 257,
+            "endLine": 257,
+            "startOffset": 8,
+            "endOffset": 10
+          },
+          "msg": "+2 (incl 1 for nesting)"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 259,
+            "endLine": 259,
+            "startOffset": 8,
+            "endOffset": 12
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 262,
+            "endLine": 262,
+            "startOffset": 4,
+            "endOffset": 6
+          },
+          "msg": "+1"
+        }
+      ]
+    },
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 266,
+            "endLine": 266,
+            "startOffset": 4,
+            "endOffset": 8
+          },
+          "msg": "+1"
+        }
+      ]
+    }
+  ]
+}

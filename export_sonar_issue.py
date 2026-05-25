@@ -2,26 +2,30 @@
 """
 Export all three tabs of a SonarCloud issue from a browser URL.
 
-Reads BEARER_TOKEN from .env (or environment variables).
+Reads BEARER_TOKEN and FETCH_PATH from .env (or environment variables).
 Accepts a SonarCloud issue URL as a command-line argument, or from the
 RAW_URL environment variable / .env file.
 
-For each run, creates a subfolder named after the issue's message, then saves:
-  - where.json  (the stripped-down issue data)
-  - why.md      (the "Why is this an issue?" explanation)
-  - how.md      (the "How can I fix it?" guidance)
+Issues of the same category are deduplicated into a single folder. The
+folder name is the trimmed issue message (identifying suffixes and trailing
+counters removed). Inside each folder:
+  - L{line}.json  (one per issue instance, named by line number)
+  - why.md        (shared — written once per category)
+  - how.md        (shared — written once per category)
 
 Files for tabs that have no content on SonarCloud are skipped (not written)
-instead of being created as empty 0 KB files. A message explains which tabs
-were skipped and why.
+instead of being created as empty 0 KB files.
 
-Duplicate issue names get a counter suffix (e.g. "issue_name", "issue_name_1", ...).
+Download path is controlled by the FETCH_PATH .env variable (falls back to
+the current directory, then the script directory). All files are placed in
+an "issues" subfolder inside FETCH_PATH.
 """
 
 import os
 import sys
 import json
 import re
+import hashlib
 import html as html_mod
 import requests
 from pathlib import Path
@@ -73,8 +77,31 @@ def find_env_file() -> Optional[Path]:
     return None
 
 
-def load_config() -> str:
-    """Load .env and return the BEARER_TOKEN. Exits on failure."""
+def resolve_fetch_path() -> Path:
+    """Resolve the download path from FETCH_PATH env var, falling back to cwd then script dir.
+
+    All downloaded files are placed in an 'issues' subfolder inside the resolved path.
+    """
+    fetch_path = os.getenv("FETCH_PATH")
+    if fetch_path:
+        resolved = Path(fetch_path).expanduser().resolve()
+    else:
+        cwd = Path.cwd()
+        script_dir = Path(__file__).parent.resolve()
+        # Prefer current working directory if writable, otherwise script directory
+        try:
+            (cwd / ".write_test").touch()
+            (cwd / ".write_test").unlink()
+            resolved = cwd
+        except (OSError, PermissionError):
+            resolved = script_dir
+    issues_dir = resolved / "issues"
+    issues_dir.mkdir(parents=True, exist_ok=True)
+    return issues_dir
+
+
+def load_config() -> Tuple[str, Path]:
+    """Load .env and return (BEARER_TOKEN, issues_path). Exits on failure."""
     env_file = find_env_file()
     if env_file:
         load_env(env_file)
@@ -85,7 +112,9 @@ def load_config() -> str:
     if not token:
         print("ERROR: BEARER_TOKEN not set. Add it to .env or set the environment variable.", file=sys.stderr)
         sys.exit(1)
-    return token
+
+    issues_path = resolve_fetch_path()
+    return token, issues_path
 
 
 # --- Helper: API call --------------------------------------------------------
@@ -123,14 +152,32 @@ def sanitise_folder_name(raw: str, max_len: int = 80) -> str:
     return name or "issue"
 
 
-def create_unique_folder(base_name: str) -> Path:
-    """Create a new folder, appending _1, _2, ... if the name already exists."""
-    folder = Path(base_name)
-    counter = 1
-    while folder.exists():
-        folder = Path(f"{base_name}_{counter}")
-        counter += 1
-    folder.mkdir(parents=True, exist_ok=False)
+def trim_folder_name(name: str) -> str:
+    """Trim identifying suffixes from a sanitised folder name.
+
+    Strips patterns that vary per instance of the same rule category:
+      - "_from_N_to_N_allo..." (e.g. "_from_27_to_the_15_allo")
+      - "_from_N_to_N_allow..." (e.g. "_from_27_to_the_15_allowed")
+      - Trailing counter "_N" (e.g. "_1", "_2")
+
+    After trimming, re-collapse underscores and strip trailing junk.
+    """
+    # Strip "_from_<digits>_to_the_<digits>_all<owed|o>" suffix
+    # (may be truncated by sanitise_folder_name, so match "all", "allo", or "allowed")
+    trimmed = re.sub(r'_from_\d+_to_the_\d+_all\w*$', '', name)
+    # Strip trailing counter "_N"
+    trimmed = re.sub(r'_\d+$', '', trimmed)
+    # Clean up any double underscores or trailing underscores left behind
+    trimmed = re.sub(r'_+', '_', trimmed)
+    trimmed = trimmed.strip('_')
+    return trimmed or name
+
+
+def get_or_create_category_folder(base_path: Path, trimmed_name: str) -> Path:
+    """Get or create a category folder under base_path. No counter suffix —
+    same-category issues are merged into one folder."""
+    folder = base_path / trimmed_name
+    folder.mkdir(parents=True, exist_ok=True)
     return folder
 
 
@@ -148,9 +195,69 @@ def write_file(folder: Path, filename: str, content: str, tab_label: str = "") -
     return True
 
 
+def write_if_different(folder: Path, filename: str, content: str, tab_label: str = "") -> bool:
+    """Write content to file only if the file doesn't exist or has different content.
+
+    Used for shared .md files (why.md, how.md) that are identical across instances
+    of the same rule category. Skips writing when content is empty, or when an
+    identical file already exists.
+    """
+    if not content or not content.strip():
+        label = f' "{tab_label}" tab' if tab_label else ''
+        print(f"  Skipped -> {filename} (no content available for{label} on SonarCloud)")
+        return False
+
+    filepath = folder / filename
+
+    if filepath.exists():
+        existing = filepath.read_text(encoding="utf-8")
+        if existing == content:
+            print(f"  Exists (identical) -> {filename}")
+            return True  # File already there with same content; no action needed
+        else:
+            # Content differs — this shouldn't normally happen for the same rule.
+            # Append a hash suffix to avoid overwriting.
+            h = hashlib.md5(content.encode()).hexdigest()[:6]
+            alt_name = f"{filepath.stem}_{h}{filepath.suffix}"
+            alt_path = folder / alt_name
+            with open(alt_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            print(f"  Saved (content differs) -> {alt_path}")
+            return True
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"  Saved -> {filepath}")
+    return True
+
+
+def resolve_line_filename(folder: Path, line: Optional[int]) -> str:
+    """Resolve a unique L{line}.json filename, appending a suffix if the
+    filename already exists (e.g. multiple issues on the same line)."""
+    if line is not None:
+        base = f"L{line}"
+    else:
+        base = "Lunknown"
+
+    filename = f"{base}.json"
+    if not (folder / filename).exists():
+        return filename
+
+    # File already exists — append an incrementing counter
+    counter = 2
+    while (folder / f"{base}_{counter}.json").exists():
+        counter += 1
+    return f"{base}_{counter}.json"
+
+
 # --- URL parsing -------------------------------------------------------------
-def parse_issue_url(raw_url: str) -> Tuple[str, str, Optional[str], Optional[str]]:
-    """Parse a SonarCloud URL into (component_key, issue_key, pull_request, branch)."""
+def parse_issue_url(raw_url: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """Parse a SonarCloud URL into (component_key, issue_key, pull_request, branch).
+
+    All values may be None if the URL is missing the corresponding parameter.
+    Callers should check that component_key and issue_key are present before
+    proceeding.
+    """
     parsed = urlparse(raw_url)
     qs = parse_qs(parsed.query)
 
@@ -174,10 +281,23 @@ def resolve_url() -> str:
 
 
 # --- Issue fetching ----------------------------------------------------------
-KEEP_FIELDS = {
-    "rule", "severity", "type", "component", "line", "textRange",
-    "message", "flows", "impacts", "cleanCodeAttribute", "cleanCodeAttributeCategory"
-}
+# Field ordering for JSON output: identity → location → description →
+# classification → multi-line evidence arrays.
+# Rationale: one-liners first so reviewers get a full picture at a glance;
+# arrays last so they don't push quick-scan info off screen.
+KEEP_FIELDS = (
+    "rule",                       # which rule fired
+    "component",                  # which file
+    "line",                       # quick reference line number
+    "textRange",                  # precise character range (small object)
+    "message",                    # human-readable description
+    "severity",                   # triage priority
+    "type",                       # CODE_SMELL / BUG / VULNERABILITY
+    "cleanCodeAttribute",          # e.g. FORMATTED
+    "cleanCodeAttributeCategory",  # e.g. CONSISTENT
+    "impacts",                    # impact details (array of objects)
+    "flows",                      # code flow evidence (potentially large array)
+)
 
 
 def fetch_issue(component_key: str, issue_key: str, token: str,
@@ -251,16 +371,27 @@ def fetch_rule_details(rule_key: str, organization: str, token: str) -> Tuple[st
 
 
 # --- Export ------------------------------------------------------------------
-def export_results(folder: Path, clean_issue: Dict, why_md: str, how_md: str):
-    """Write the three output files and print a summary."""
+def export_results(folder: Path, line: Optional[int], clean_issue: Dict,
+                   why_md: str, how_md: str):
+    """Write the output files and print a summary.
+
+    - where.json is renamed to L{line}.json to allow multiple instances per folder.
+    - why.md and how.md are only written if they don't already exist with identical content.
+    """
+    line_json_name = resolve_line_filename(folder, line)
     written = []
     skipped = []
-    for fname, fcontent, flabel in [
-        ("where.json", json.dumps(clean_issue, indent=2), "Where is the issue?"),
-        ("why.md", why_md, "Why is this an issue?"),
-        ("how.md", how_md, "How can I fix it?"),
+
+    for fname, fcontent, flabel, dedup in [
+        (line_json_name, json.dumps(clean_issue, indent=2, sort_keys=False), "Where is the issue?", False),
+        ("why.md", why_md, "Why is this an issue?", True),
+        ("how.md", how_md, "How can I fix it?", True),
     ]:
-        if write_file(folder, fname, fcontent, flabel):
+        if dedup:
+            ok = write_if_different(folder, fname, fcontent, flabel)
+        else:
+            ok = write_file(folder, fname, fcontent, flabel)
+        if ok:
             written.append(fname)
         else:
             skipped.append(fname)
@@ -270,12 +401,12 @@ def export_results(folder: Path, clean_issue: Dict, why_md: str, how_md: str):
         print(f"Skipped {len(skipped)} empty tab(s): {', '.join(skipped)}")
         print("(These tabs don't have content for this issue on SonarCloud.)")
     else:
-        print(f"\nAll three tabs exported successfully to {folder}/")
+        print(f"\nAll tabs exported successfully to {folder}/")
 
 
 # --- Main --------------------------------------------------------------------
 def main():
-    token = load_config()
+    token, issues_path = load_config()
     raw_url = resolve_url()
 
     component_key, issue_key, pull_request, branch = parse_issue_url(raw_url)
@@ -289,21 +420,25 @@ def main():
         print(f"PR        : {pull_request}")
     if branch:
         print(f"Branch    : {branch}")
+    print(f"Save to   : {issues_path}")
 
     print("Fetching issue details ...")
     clean_issue = fetch_issue(component_key, issue_key, token, pull_request, branch)
     rule_key = clean_issue.pop("_rule_key")
     organization = clean_issue.pop("_organization")
     issue_message = clean_issue.pop("_message")
+    issue_line = clean_issue.get("line")
 
     print(f"Fetching rule details for {rule_key} (org: {organization}) ...")
     why_md, how_md = fetch_rule_details(rule_key, organization, token)
 
-    base_name = sanitise_folder_name(issue_message)
-    folder = create_unique_folder(base_name)
+    # Trim the folder name to deduplicate same-category issues
+    raw_name = sanitise_folder_name(issue_message)
+    trimmed_name = trim_folder_name(raw_name)
+    folder = get_or_create_category_folder(issues_path, trimmed_name)
     print(f"\nOutput folder -> {folder}")
 
-    export_results(folder, clean_issue, why_md, how_md)
+    export_results(folder, issue_line, clean_issue, why_md, how_md)
 
 
 if __name__ == "__main__":

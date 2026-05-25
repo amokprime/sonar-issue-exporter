@@ -1,0 +1,16 @@
+{
+  "rule": "text:S8565",
+  "component": "amokprime_sonar-issue-exporter:pyproject.toml",
+  "message": "Dependency versions are not predictable if the lock file (uv.lock or poetry.lock) is missing.",
+  "severity": "MAJOR",
+  "type": "VULNERABILITY",
+  "cleanCodeAttribute": "COMPLETE",
+  "cleanCodeAttributeCategory": "INTENTIONAL",
+  "impacts": [
+    {
+      "softwareQuality": "SECURITY",
+      "severity": "MEDIUM"
+    }
+  ],
+  "flows": []
+}
