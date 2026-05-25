@@ -27,7 +27,7 @@ sonar-issue-exporter is a tool for downloading SonarQube Cloud issues to text fi
    ```
    pip install "sonar-issue-exporter[markdown] @ git+https://github.com/amokprime/sonar-issue-exporter.git"
    ```
-3. Rename `sample.env` to `.env` in the script directory or create a `.env` file in the directory where you run the commands. Paste your token between the quotes and save. If `FETCH_PATH` is not set, the tool falls back to the current working directory, then the script directory.
+3. Create an `.env` file in your home folder (i.e. `%USERNAME%`, `~`) or wherever you installed with `pip` from. If you cloned the repo, rename `sample.env` to `.env` in the script directory. Paste your token between the quotes and save. If `FETCH_PATH` is not set, the tool falls back to the current working directory, then the script directory.
    ```
    BEARER_TOKEN="your-token-here"
    FETCH_PATH="/path/to/downloads"
