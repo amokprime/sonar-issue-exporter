@@ -25,7 +25,7 @@ import os
 import sys
 import json
 import re
-import hashlib
+# hashlib removed — no cryptographic hashing needed; see write_if_different()
 import html as html_mod
 import requests
 from pathlib import Path
@@ -93,7 +93,7 @@ def resolve_fetch_path() -> Path:
             (cwd / ".write_test").touch()
             (cwd / ".write_test").unlink()
             resolved = cwd
-        except (OSError, PermissionError):
+        except OSError:
             resolved = script_dir
     issues_dir = resolved / "issues"
     issues_dir.mkdir(parents=True, exist_ok=True)
@@ -217,7 +217,7 @@ def write_if_different(folder: Path, filename: str, content: str, tab_label: str
         else:
             # Content differs — this shouldn't normally happen for the same rule.
             # Append a hash suffix to avoid overwriting.
-            h = hashlib.md5(content.encode()).hexdigest()[:6]
+            h = hex(hash(content.encode()))[-6:]
             alt_name = f"{filepath.stem}_{h}{filepath.suffix}"
             alt_path = folder / alt_name
             with open(alt_path, "w", encoding="utf-8") as f:

@@ -1,0 +1,38 @@
+{
+  "rule": "python:S5713",
+  "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+  "line": 96,
+  "textRange": {
+    "startLine": 96,
+    "endLine": 96,
+    "startOffset": 25,
+    "endOffset": 40
+  },
+  "message": "Remove this redundant Exception class; it derives from another which is already caught.",
+  "severity": "MINOR",
+  "type": "CODE_SMELL",
+  "cleanCodeAttribute": "LOGICAL",
+  "cleanCodeAttributeCategory": "INTENTIONAL",
+  "impacts": [
+    {
+      "softwareQuality": "MAINTAINABILITY",
+      "severity": "LOW"
+    }
+  ],
+  "flows": [
+    {
+      "locations": [
+        {
+          "component": "amokprime_sonar-issue-exporter:export_sonar_issue.py",
+          "textRange": {
+            "startLine": 96,
+            "endLine": 96,
+            "startOffset": 16,
+            "endOffset": 23
+          },
+          "msg": "Parent class."
+        }
+      ]
+    }
+  ]
+}
