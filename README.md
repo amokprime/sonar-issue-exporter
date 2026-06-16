@@ -1,7 +1,7 @@
 # sonar-issue-exporter
 
 ### AI Disclosure and Disclaimer
-I am neither a developer nor affiliated with Sonar. The Python scripts in this repo are vibe-coded with [DeepSeek](https://chat.deepseek.com/) and [Z.ai](https://chat.z.ai/). Prompt history for the scripts is in [/archive](https://github.com/amokprime/sonar-issue-exporter/tree/main/archive). I have only tested the scripts with GitHub on Windows 11 (0.1.0-0.2.0) and Fedora 44 KDE (0.2.1+). They might also work for repos on GitLab, Bitbucket, and Azure Cloud on any OS where Python is supported.
+I am neither a developer nor affiliated with Sonar. The Python scripts in this repo are vibe-coded with [DeepSeek](https://chat.deepseek.com/) and [Z.ai](https://chat.z.ai/). Prompt history for the scripts is in [/archive](https://github.com/amokprime/sonar-issue-exporter/tree/main/archive). I have only tested the scripts with GitHub on Windows 11 (v0.1.0-0.2.0) and Fedora 44 KDE (v0.2.1+). They might also work for repos on GitLab, Bitbucket, and Azure Cloud on any OS where Python is supported.
 
 sonar-issues-exporter is not an official Sonar product. It is a client tool that fetches data from the SonarQube Cloud [Web API](https://docs.sonarsource.com/sonarqube-cloud/appendices/web-api). Users must have their own authorized SonarCloud account and API token. Rule descriptions and educational content are the intellectual property of SonarSource SA. This tool does not bundle or redistribute SonarSource content (see .gitignore).
 
