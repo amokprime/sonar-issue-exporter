@@ -21,32 +21,36 @@ the current directory, then the script directory). All files are placed in
 an "issues" subfolder inside FETCH_PATH.
 """
 
-import os
-import sys
-import json
-import re
 # hashlib removed — no cryptographic hashing needed; see write_if_different()
 import html as html_mod
-import requests
+import json
+import os
+import re
+import sys
 from pathlib import Path
 from typing import Dict, Optional, Tuple
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
+
+import requests
 
 # Try to use html2text for better Markdown conversion; fall back to simple stripping.
 try:
     import html2text
+
     _HTML2TEXT = html2text.HTML2Text()
     _HTML2TEXT.body_width = 0
     _HTML2TEXT.ignore_links = False
+
     def html_to_md(html: str) -> str:
         return _HTML2TEXT.handle(html).strip()
 except ImportError:
+
     def html_to_md(html: str) -> str:
         """Basic HTML to Markdown-like text: remove tags, decode entities, replace <br> with newline."""
-        text = re.sub(r'<br\s*/?>', '\n', html, flags=re.IGNORECASE)
-        text = re.sub(r'<[^>]+>', '', text)
+        text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", "", text)
         text = html_mod.unescape(text)
-        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
 
 
@@ -67,13 +71,13 @@ def load_env(env_path: Path = Path(".env")):
 
 
 def find_env_file() -> Optional[Path]:
-    """Find the .env file, checking the current directory first, then the script's directory."""
+    """Find the .env file: current directory, then home directory."""
     cwd_env = Path.cwd() / ".env"
     if cwd_env.exists():
         return cwd_env
-    script_env = Path(__file__).parent / ".env"
-    if script_env.exists():
-        return script_env
+    home_env = Path.home() / ".env"
+    if home_env.exists():
+        return home_env
     return None
 
 
@@ -100,18 +104,23 @@ def resolve_fetch_path() -> Path:
     return issues_dir
 
 
-def load_config() -> Tuple[str, Path]:
-    """Load .env and return (BEARER_TOKEN, issues_path). Exits on failure."""
+def load_config() -> Tuple[Optional[str], Path]:
+    """Load .env and return (BEARER_TOKEN, issues_path). Token may be None for public projects."""
     env_file = find_env_file()
     if env_file:
         load_env(env_file)
     else:
-        print("Note: no .env file found in current directory or script directory.", file=sys.stderr)
+        print(
+            "Note: no .env file found in current directory, script directory, or home directory.",
+            file=sys.stderr,
+        )
 
-    token = os.getenv("BEARER_TOKEN")
+    token = os.getenv("BEARER_TOKEN") or None
     if not token:
-        print("ERROR: BEARER_TOKEN not set. Add it to .env or set the environment variable.", file=sys.stderr)
-        sys.exit(1)
+        print(
+            "Note: no BEARER_TOKEN set. Attempting unauthenticated access (public projects only).",
+            file=sys.stderr,
+        )
 
     issues_path = resolve_fetch_path()
     return token, issues_path
@@ -121,8 +130,10 @@ def load_config() -> Tuple[str, Path]:
 BASE = "https://sonarcloud.io/api"
 
 
-def api_get(endpoint: str, params: dict, token: str) -> dict:
-    headers = {"Authorization": f"Bearer {token}"}
+def api_get(endpoint: str, params: dict, token: Optional[str] = None) -> dict:
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     url = f"{BASE}/{endpoint}"
     resp = requests.get(url, params=params, headers=headers)
     try:
@@ -130,6 +141,11 @@ def api_get(endpoint: str, params: dict, token: str) -> dict:
     except requests.exceptions.HTTPError as e:
         print(f"\nAPI ERROR: {e}", file=sys.stderr)
         print("Response body:", resp.text, file=sys.stderr)
+        if resp.status_code == 401:
+            print(
+                "Hint: this project may require authentication. Set BEARER_TOKEN in .env.",
+                file=sys.stderr,
+            )
         raise
     return resp.json()
 
@@ -143,12 +159,12 @@ def sanitise_folder_name(raw: str, max_len: int = 80) -> str:
     - Collapse multiple underscores
     - Truncate to max_len
     """
-    name = raw.replace(' ', '_')
-    name = re.sub(r'[<>:"/\\|?*]', '', name)
-    name = re.sub(r'_+', '_', name)
-    name = name.strip(' .-')
+    name = raw.replace(" ", "_")
+    name = re.sub(r'[<>:"/\\|?*]', "", name)
+    name = re.sub(r"_+", "_", name)
+    name = name.strip(" .-")
     if len(name) > max_len:
-        name = name[:max_len].rstrip('_')
+        name = name[:max_len].rstrip("_")
     return name or "issue"
 
 
@@ -164,12 +180,12 @@ def trim_folder_name(name: str) -> str:
     """
     # Strip "_from_<digits>_to_the_<digits>_all<owed|o>" suffix
     # (may be truncated by sanitise_folder_name, so match "all", "allo", or "allowed")
-    trimmed = re.sub(r'_from_\d+_to_the_\d+_all\w*$', '', name)
+    trimmed = re.sub(r"_from_\d+_to_the_\d+_all\w*$", "", name)
     # Strip trailing counter "_N"
-    trimmed = re.sub(r'_\d+$', '', trimmed)
+    trimmed = re.sub(r"_\d+$", "", trimmed)
     # Clean up any double underscores or trailing underscores left behind
-    trimmed = re.sub(r'_+', '_', trimmed)
-    trimmed = trimmed.strip('_')
+    trimmed = re.sub(r"_+", "_", trimmed)
+    trimmed = trimmed.strip("_")
     return trimmed or name
 
 
@@ -185,8 +201,10 @@ def get_or_create_category_folder(base_path: Path, trimmed_name: str) -> Path:
 def write_file(folder: Path, filename: str, content: str, tab_label: str = "") -> bool:
     """Write content to file. Skip if content is empty/whitespace-only."""
     if not content or not content.strip():
-        label = f' "{tab_label}" tab' if tab_label else ''
-        print(f"  Skipped -> {filename} (no content available for{label} on SonarCloud)")
+        label = f' "{tab_label}" tab' if tab_label else ""
+        print(
+            f"  Skipped -> {filename} (no content available for{label} on SonarCloud)"
+        )
         return False
     filepath = folder / filename
     with open(filepath, "w", encoding="utf-8") as f:
@@ -195,7 +213,9 @@ def write_file(folder: Path, filename: str, content: str, tab_label: str = "") -
     return True
 
 
-def write_if_different(folder: Path, filename: str, content: str, tab_label: str = "") -> bool:
+def write_if_different(
+    folder: Path, filename: str, content: str, tab_label: str = ""
+) -> bool:
     """Write content to file only if the file doesn't exist or has different content.
 
     Used for shared .md files (why.md, how.md) that are identical across instances
@@ -203,8 +223,10 @@ def write_if_different(folder: Path, filename: str, content: str, tab_label: str
     identical file already exists.
     """
     if not content or not content.strip():
-        label = f' "{tab_label}" tab' if tab_label else ''
-        print(f"  Skipped -> {filename} (no content available for{label} on SonarCloud)")
+        label = f' "{tab_label}" tab' if tab_label else ""
+        print(
+            f"  Skipped -> {filename} (no content available for{label} on SonarCloud)"
+        )
         return False
 
     filepath = folder / filename
@@ -251,7 +273,9 @@ def resolve_line_filename(folder: Path, line: Optional[int]) -> str:
 
 
 # --- URL parsing -------------------------------------------------------------
-def parse_issue_url(raw_url: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+def parse_issue_url(
+    raw_url: str,
+) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
     """Parse a SonarCloud URL into (component_key, issue_key, pull_request, branch).
 
     All values may be None if the URL is missing the corresponding parameter.
@@ -262,9 +286,9 @@ def parse_issue_url(raw_url: str) -> Tuple[Optional[str], Optional[str], Optiona
     qs = parse_qs(parsed.query)
 
     component_key = qs.get("id", [None])[0]
-    issue_key     = qs.get("open", [None])[0]
-    pull_request  = qs.get("pullRequest", [None])[0]
-    branch        = qs.get("branch", [None])[0]
+    issue_key = qs.get("open", [None])[0]
+    pull_request = qs.get("pullRequest", [None])[0]
+    branch = qs.get("branch", [None])[0]
 
     return component_key, issue_key, pull_request, branch
 
@@ -275,7 +299,10 @@ def resolve_url() -> str:
         return sys.argv[1]
     raw_url = os.getenv("RAW_URL")
     if not raw_url:
-        print("ERROR: provide a SonarCloud issue URL as an argument, or set RAW_URL in .env.", file=sys.stderr)
+        print(
+            "ERROR: provide a SonarCloud issue URL as an argument, or set RAW_URL in .env.",
+            file=sys.stderr,
+        )
         sys.exit(1)
     return raw_url
 
@@ -286,23 +313,27 @@ def resolve_url() -> str:
 # Rationale: one-liners first so reviewers get a full picture at a glance;
 # arrays last so they don't push quick-scan info off screen.
 KEEP_FIELDS = (
-    "rule",                       # which rule fired
-    "component",                  # which file
-    "line",                       # quick reference line number
-    "textRange",                  # precise character range (small object)
-    "message",                    # human-readable description
-    "severity",                   # triage priority
-    "type",                       # CODE_SMELL / BUG / VULNERABILITY
-    "cleanCodeAttribute",          # e.g. FORMATTED
+    "rule",  # which rule fired
+    "component",  # which file
+    "line",  # quick reference line number
+    "textRange",  # precise character range (small object)
+    "message",  # human-readable description
+    "severity",  # triage priority
+    "type",  # CODE_SMELL / BUG / VULNERABILITY
+    "cleanCodeAttribute",  # e.g. FORMATTED
     "cleanCodeAttributeCategory",  # e.g. CONSISTENT
-    "impacts",                    # impact details (array of objects)
-    "flows",                      # code flow evidence (potentially large array)
+    "impacts",  # impact details (array of objects)
+    "flows",  # code flow evidence (potentially large array)
 )
 
 
-def fetch_issue(component_key: str, issue_key: str, token: str,
-                pull_request: Optional[str] = None,
-                branch: Optional[str] = None) -> Dict:
+def fetch_issue(
+    component_key: str,
+    issue_key: str,
+    token: Optional[str],
+    pull_request: Optional[str] = None,
+    branch: Optional[str] = None,
+) -> Dict:
     """Fetch an issue from SonarCloud and return the cleaned issue dict.
 
     Also returns rule_key, organization, and issue_message via the dict.
@@ -346,7 +377,7 @@ def extract_rule_descriptions(rule: dict) -> Tuple[str, str]:
 
     if sections:
         intro = sections.get("introduction", "")
-        root  = sections.get("root_cause", "")
+        root = sections.get("root_cause", "")
         why_html = f"{intro}\n\n{root}".strip()
         how_html = sections.get("how_to_fix", "")
 
@@ -359,20 +390,27 @@ def extract_rule_descriptions(rule: dict) -> Tuple[str, str]:
     return why_html, how_html
 
 
-def fetch_rule_details(rule_key: str, organization: str, token: str) -> Tuple[str, str]:
+def fetch_rule_details(
+    rule_key: str, organization: str, token: Optional[str]
+) -> Tuple[str, str]:
     """Fetch rule details and return (why_md, how_md)."""
-    rule_data = api_get("rules/show", {
-        "key": rule_key,
-        "organization": organization,
-    }, token)
+    rule_data = api_get(
+        "rules/show",
+        {
+            "key": rule_key,
+            "organization": organization,
+        },
+        token,
+    )
     rule = rule_data.get("rule", {})
     why_html, how_html = extract_rule_descriptions(rule)
     return html_to_md(why_html), html_to_md(how_html)
 
 
 # --- Export ------------------------------------------------------------------
-def export_results(folder: Path, line: Optional[int], clean_issue: Dict,
-                   why_md: str, how_md: str):
+def export_results(
+    folder: Path, line: Optional[int], clean_issue: Dict, why_md: str, how_md: str
+):
     """Write the output files and print a summary.
 
     - where.json is renamed to L{line}.json to allow multiple instances per folder.
@@ -383,7 +421,12 @@ def export_results(folder: Path, line: Optional[int], clean_issue: Dict,
     skipped = []
 
     for fname, fcontent, flabel, dedup in [
-        (line_json_name, json.dumps(clean_issue, indent=2, sort_keys=False), "Where is the issue?", False),
+        (
+            line_json_name,
+            json.dumps(clean_issue, indent=2, sort_keys=False),
+            "Where is the issue?",
+            False,
+        ),
         ("why.md", why_md, "Why is this an issue?", True),
         ("how.md", how_md, "How can I fix it?", True),
     ]:

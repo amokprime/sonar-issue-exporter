@@ -11,12 +11,13 @@ in the clipboard from a previous session is never re-fetched automatically.
 
 Run once and leave it in the background. Press Ctrl+C to stop.
 """
+
+import re
 import shutil
 import subprocess
 import sys
-import time
-import re
 import threading
+import time
 from pathlib import Path
 
 try:
@@ -64,13 +65,15 @@ class DownloadTracker:
     def add(self, url_short: str, process: subprocess.Popen):
         """Register a new download."""
         with self._lock:
-            self._entries.append({
-                "url_short": url_short,
-                "process": process,
-                "done": False,
-                "frame": 0,
-                "line_pos": self._next_line_pos,
-            })
+            self._entries.append(
+                {
+                    "url_short": url_short,
+                    "process": process,
+                    "done": False,
+                    "frame": 0,
+                    "line_pos": self._next_line_pos,
+                }
+            )
             self._next_line_pos += 1
         self._ensure_display_running()
 
@@ -92,6 +95,7 @@ class DownloadTracker:
                     ret = entry["process"].poll()
                     if ret is not None:
                         entry["done"] = True
+                        entry["process"].wait()  # ensure returncode is set
                         self._print_completed(entry)
                     else:
                         entry["frame"] = (entry["frame"] + 1) % len(SPINNER_FRAMES)
@@ -116,9 +120,13 @@ class DownloadTracker:
         sys.stdout.flush()
 
     def _print_completed(self, entry: dict):
-        """Print the checkmark line for a completed download."""
+        """Print the checkmark or cross line for a completed download."""
         url = entry["url_short"]
-        sys.stdout.write(f"\r  {CHECKMARK} {url}{_CLEAR_EOL}\n")
+        ret = entry["process"].returncode
+        if ret == 0:
+            sys.stdout.write(f"\r  ✓ {url}{_CLEAR_EOL}\n")
+        else:
+            sys.stdout.write(f"\r  ✗ {url} (exit {ret}){_CLEAR_EOL}\n")
         sys.stdout.flush()
 
     def wait_all(self):
@@ -149,12 +157,18 @@ def main():
     while True:
         try:
             current = pyperclip.paste().strip()
-            if current != last_url and current.startswith("https://sonarcloud.io/") and URL_PATTERN.search(current):
+            if (
+                current != last_url
+                and current.startswith("https://sonarcloud.io/")
+                and URL_PATTERN.search(current)
+            ):
                 last_url = current
                 url_short = current[:80] + ("..." if len(current) > 80 else "")
                 proc = subprocess.Popen(
                     EXPORT_CMD + [current],
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                    if sys.platform == "win32"
+                    else 0,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )
