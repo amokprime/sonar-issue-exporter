@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sonar-issue-exporter"
-version = "0.2.1"
+version = "0.2.2"
 description = "Export SonarQube Cloud issues to AI-readable text files"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
     "requests>=2.33.0",
@@ -23,3 +23,8 @@ sonar-watch = "watch_clipboard:main"
 
 [tool.setuptools]
 py-modules = ["export_sonar_issue", "watch_clipboard"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.20",
+]

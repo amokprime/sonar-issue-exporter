@@ -1,7 +1,10 @@
 # sonar-issue-exporter
 
+### 🚧Account flag🚧
+This started around the time I migrated from Windows 11 to Fedora 44 KDE. It means:  GitHub Pages, GitHub Actions (aka CI), GitHub Copilot, are all down for me. The `git clone/git pull` based installation steps for this project are not affected. After the previous commit, I decided to only commit linting patches and documentation edits until either the flag is lifted or I redeploy CI elsewhere.
+
 ### AI Disclosure and Disclaimer
-I am neither a developer nor affiliated with Sonar. The Python scripts in this repo are vibe-coded with [DeepSeek](https://chat.deepseek.com/) and [Z.ai](https://chat.z.ai/). Prompt history for the scripts is in [/archive](https://github.com/amokprime/sonar-issue-exporter/tree/main/archive). I have only tested the scripts with GitHub on Windows 11 (v0.1.0-0.2.0) and Fedora 44 KDE (v0.2.1+). They might also work for repos on GitLab, Bitbucket, and Azure Cloud on any OS where Python is supported.
+I am neither a developer nor affiliated with Sonar. The Python scripts in this repo are vibe-coded with [DeepSeek](https://chat.deepseek.com/) and [Z.ai](https://chat.z.ai/). Prompt history for the scripts is in [/archive](https://github.com/amokprime/sonar-issue-exporter/tree/main/archive). I have only tested the scripts with GitHub on Windows 11 (0.1.0-0.2.0) and Fedora 44 KDE (0.2.1+). They might also work for repos on GitLab, Bitbucket, and Azure Cloud on any OS where Python is supported.
 
 sonar-issues-exporter is not an official Sonar product. It is a client tool that fetches data from the SonarQube Cloud [Web API](https://docs.sonarsource.com/sonarqube-cloud/appendices/web-api). Users must have their own authorized SonarCloud account and API token. Rule descriptions and educational content are the intellectual property of SonarSource SA. This tool does not bundle or redistribute SonarSource content (see .gitignore).
 
@@ -16,7 +19,7 @@ sonar-issue-exporter is a tool for downloading SonarQube Cloud issues to text fi
 3. For private projects, go to your SonarQube Cloud account → Security (shield icon) in left ribbon → Generate Tokens → Enter some name you'll remember → Copy the token and save it to a password manager like KeepassXC
 
 #### Installation
-1. Install [Python 3.8+](https://www.python.org/downloads/) and [uv](https://docs.astral.sh/uv/getting-started/installation/)
+1. Install [Python 3.10+](https://www.python.org/downloads/) and [uv](https://docs.astral.sh/uv/getting-started/installation/)
 2. Install sonar-issue-exporter:
 ```sh
 git clone https://github.com/amokprime/sonar-issue-exporter.git

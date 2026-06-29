@@ -34,9 +34,7 @@ else:
     EXPORT_CMD = [sys.executable, EXPORT_SCRIPT]
 
 # Regex to quickly identify a SonarCloud issue URL
-URL_PATTERN = re.compile(
-    r"https://sonarcloud\.io/project/issues\?.*?open=[A-Za-z0-9_-]+"
-)
+URL_PATTERN = re.compile(r"https://sonarcloud\.io/project/issues\?.*?open=[A-Za-z0-9_-]+")
 
 # 6-dot braille spinner frames
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴"]
@@ -56,7 +54,9 @@ class DownloadTracker:
 
     def __init__(self):
         self._lock = threading.Lock()
-        # Each entry: { "url_short": str, "process": Popen, "done": bool, "frame": int, "line_pos": int }
+        # Each entry shape:
+        #   { "url_short": str, "process": Popen, "done": bool,
+        #     "frame": int, "line_pos": int }
         self._entries = []
         self._display_thread = None
         self._stop_event = threading.Event()
@@ -166,9 +166,7 @@ def main():
                 url_short = current[:80] + ("..." if len(current) > 80 else "")
                 proc = subprocess.Popen(
                     EXPORT_CMD + [current],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                    if sys.platform == "win32"
-                    else 0,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )

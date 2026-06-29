@@ -1,0 +1,38 @@
+# ruff.toml — linter + formatter config for sonar-issue-exporter
+#
+# Complements .github/workflows/sonarcloud.yml: SonarCloud runs in CI,
+# Ruff runs in-editor. The two intentionally overlap.
+
+# Pyproject is excluded from linting (it's project metadata, not source).
+# Same logic for uv.lock, LICENSE, README.md, etc.
+line-length = 100
+
+extend-exclude = [
+    "archive/**",          # historical version snapshots
+    ".venv",
+    "uv.lock",
+    "pyproject.toml",
+    "requirements.txt",
+    "sample.env",
+    "LICENSE",
+    "README.md",
+]
+
+[lint]
+# Default rule sets are already sensible. Add sonar-style complexity rules:
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes (unused imports, undefined names)
+    "I",    # isort (import ordering)
+    "C90",  # mccabe cognitive complexity — mirrors sonarjs/cognitive-complexity
+    "UP",   # pyupgrade (modernize syntax)
+    "B",    # flake8-bugbear (common pitfalls)
+]
+
+# Same philosophy as LineByLine: complexity is a warning, not a blocker.
+[lint.per-file-ignores]
+"export_sonar_issue.py" = ["C901"]  # main() is intentionally long; refactoring tracked in archive/0.1.2/*
+
+[format]
+# Match Black's style (Ruff's default) — no opinionated changes needed.

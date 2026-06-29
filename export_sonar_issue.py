@@ -28,7 +28,6 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 import requests
@@ -46,7 +45,9 @@ try:
 except ImportError:
 
     def html_to_md(html: str) -> str:
-        """Basic HTML to Markdown-like text: remove tags, decode entities, replace <br> with newline."""
+        """Basic HTML to Markdown-like text.
+        Removes tags, decodes entities, replaces <br> with newline.
+        """
         text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
         text = re.sub(r"<[^>]+>", "", text)
         text = html_mod.unescape(text)
@@ -70,7 +71,7 @@ def load_env(env_path: Path = Path(".env")):
             os.environ[key] = value
 
 
-def find_env_file() -> Optional[Path]:
+def find_env_file() -> Path | None:
     """Find the .env file: current directory, then home directory."""
     cwd_env = Path.cwd() / ".env"
     if cwd_env.exists():
@@ -104,7 +105,7 @@ def resolve_fetch_path() -> Path:
     return issues_dir
 
 
-def load_config() -> Tuple[Optional[str], Path]:
+def load_config() -> tuple[str | None, Path]:
     """Load .env and return (BEARER_TOKEN, issues_path). Token may be None for public projects."""
     env_file = find_env_file()
     if env_file:
@@ -130,7 +131,7 @@ def load_config() -> Tuple[Optional[str], Path]:
 BASE = "https://sonarcloud.io/api"
 
 
-def api_get(endpoint: str, params: dict, token: Optional[str] = None) -> dict:
+def api_get(endpoint: str, params: dict, token: str | None = None) -> dict:
     headers = {}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -202,9 +203,7 @@ def write_file(folder: Path, filename: str, content: str, tab_label: str = "") -
     """Write content to file. Skip if content is empty/whitespace-only."""
     if not content or not content.strip():
         label = f' "{tab_label}" tab' if tab_label else ""
-        print(
-            f"  Skipped -> {filename} (no content available for{label} on SonarCloud)"
-        )
+        print(f"  Skipped -> {filename} (no content available for{label} on SonarCloud)")
         return False
     filepath = folder / filename
     with open(filepath, "w", encoding="utf-8") as f:
@@ -213,9 +212,7 @@ def write_file(folder: Path, filename: str, content: str, tab_label: str = "") -
     return True
 
 
-def write_if_different(
-    folder: Path, filename: str, content: str, tab_label: str = ""
-) -> bool:
+def write_if_different(folder: Path, filename: str, content: str, tab_label: str = "") -> bool:
     """Write content to file only if the file doesn't exist or has different content.
 
     Used for shared .md files (why.md, how.md) that are identical across instances
@@ -224,9 +221,7 @@ def write_if_different(
     """
     if not content or not content.strip():
         label = f' "{tab_label}" tab' if tab_label else ""
-        print(
-            f"  Skipped -> {filename} (no content available for{label} on SonarCloud)"
-        )
+        print(f"  Skipped -> {filename} (no content available for{label} on SonarCloud)")
         return False
 
     filepath = folder / filename
@@ -253,7 +248,7 @@ def write_if_different(
     return True
 
 
-def resolve_line_filename(folder: Path, line: Optional[int]) -> str:
+def resolve_line_filename(folder: Path, line: int | None) -> str:
     """Resolve a unique L{line}.json filename, appending a suffix if the
     filename already exists (e.g. multiple issues on the same line)."""
     if line is not None:
@@ -275,7 +270,7 @@ def resolve_line_filename(folder: Path, line: Optional[int]) -> str:
 # --- URL parsing -------------------------------------------------------------
 def parse_issue_url(
     raw_url: str,
-) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None, str | None, str | None]:
     """Parse a SonarCloud URL into (component_key, issue_key, pull_request, branch).
 
     All values may be None if the URL is missing the corresponding parameter.
@@ -330,10 +325,10 @@ KEEP_FIELDS = (
 def fetch_issue(
     component_key: str,
     issue_key: str,
-    token: Optional[str],
-    pull_request: Optional[str] = None,
-    branch: Optional[str] = None,
-) -> Dict:
+    token: str | None,
+    pull_request: str | None = None,
+    branch: str | None = None,
+) -> dict:
     """Fetch an issue from SonarCloud and return the cleaned issue dict.
 
     Also returns rule_key, organization, and issue_message via the dict.
@@ -368,7 +363,7 @@ def fetch_issue(
 
 
 # --- Rule description parsing ------------------------------------------------
-def extract_rule_descriptions(rule: dict) -> Tuple[str, str]:
+def extract_rule_descriptions(rule: dict) -> tuple[str, str]:
     """Extract the 'why' and 'how' HTML content from a rule dict.
 
     Returns (why_html, how_html).
@@ -390,9 +385,7 @@ def extract_rule_descriptions(rule: dict) -> Tuple[str, str]:
     return why_html, how_html
 
 
-def fetch_rule_details(
-    rule_key: str, organization: str, token: Optional[str]
-) -> Tuple[str, str]:
+def fetch_rule_details(rule_key: str, organization: str, token: str | None) -> tuple[str, str]:
     """Fetch rule details and return (why_md, how_md)."""
     rule_data = api_get(
         "rules/show",
@@ -408,9 +401,7 @@ def fetch_rule_details(
 
 
 # --- Export ------------------------------------------------------------------
-def export_results(
-    folder: Path, line: Optional[int], clean_issue: Dict, why_md: str, how_md: str
-):
+def export_results(folder: Path, line: int | None, clean_issue: dict, why_md: str, how_md: str):
     """Write the output files and print a summary.
 
     - where.json is renamed to L{line}.json to allow multiple instances per folder.
