@@ -1,8 +1,5 @@
 # sonar-issue-exporter
 
-### 🚧Account flag🚧
-This started around the time I migrated from Windows 11 to Fedora 44 KDE. It means:  GitHub Pages, GitHub Actions (aka CI), GitHub Copilot, are all down for me. The `git clone/git pull` based installation steps for this project are not affected. After the previous commit, I decided to only commit linting patches and documentation edits until either the flag is lifted or I redeploy CI elsewhere.
-
 ### AI Disclosure and Disclaimer
 I am neither a developer nor affiliated with Sonar. The Python scripts in this repo are vibe-coded with [DeepSeek](https://chat.deepseek.com/) and [Z.ai](https://chat.z.ai/). Prompt history for the scripts is in [/archive](https://github.com/amokprime/sonar-issue-exporter/tree/main/archive). I have only tested the scripts with GitHub on Windows 11 (0.1.0-0.2.0) and Fedora 44 KDE (0.2.1+). They might also work for repos on GitLab, Bitbucket, and Azure Cloud on any OS where Python is supported.
 
