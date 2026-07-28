@@ -56,10 +56,11 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Verify Java
+      - name: Verify Java (before Sonar)
         run: |
-          echo "JAVA_HOME: $JAVA_HOME"
-          java -version
+          echo "setup-java java-home: ${{ steps.setup-java.outputs.java-home }}"
+          echo "JAVA_HOME env (runner): $JAVA_HOME"
+          "${{ steps.setup-java.outputs.java-home }}/bin/java" -version
 
       - name: Analyze with SonarCloud
         # You can pin the exact commit or the version.
@@ -67,8 +68,8 @@ jobs:
         uses: SonarSource/sonarcloud-github-action@4006f663ecaf1f8093e8e4abb9227f6041f52216
         env:
           SONAR_TOKEN: ${{ secrets.ISSUES_TOOL }}   # Generate a token on Sonarcloud.io, add it to the secrets of this repo with the name SONAR_TOKEN (Settings > Secrets > Actions > add new repository secret)
-          JAVA_HOME: ${{ env.JAVA_HOME_21_X64 }}         # ensure the Sonar step uses Java 21
-          PATH: ${{ env.JAVA_HOME_21_X64 }}/bin:${{ env.PATH }}
+          JAVA_HOME: ${{ steps.setup-java.outputs.java-home }}
+          PATH: ${{ steps.setup-java.outputs.java-home }}/bin:${{ env.PATH }}
         with:
           # Additional arguments for the SonarScanner CLI
           args:
