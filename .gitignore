@@ -34,6 +34,7 @@ npm-debug.log*
 
 # Offline
 .obsidian
+.trash
 ROADMAP.md
 why.md
 how.md
