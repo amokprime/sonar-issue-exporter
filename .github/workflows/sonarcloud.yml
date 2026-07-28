@@ -27,7 +27,7 @@ jobs:
           java-version: '21'
 
       - name: Analyze with SonarCloud
-        uses: SonarSource/sonarqube-scan-action@v5.0.0
+        uses: SonarSource/sonarqube-scan-action@v6.0.0
         env:
           SONAR_TOKEN: ${{ secrets.ISSUES_TOOL }}
         with:
