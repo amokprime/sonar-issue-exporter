@@ -26,8 +26,21 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Check SONAR_TOKEN availability
+        id: check_token
+        env:
+          SONAR_TOKEN: ${{ secrets.ISSUES_TOOL }}
+        run: |
+          if [ -n "$SONAR_TOKEN" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SONAR_TOKEN not available — skipping SonarCloud analysis (normal for Dependabot/fork PRs)"
+          fi
+
       - name: Analyze with SonarCloud
-        uses: SonarSource/sonarqube-scan-action@v5.0.0
+        if: steps.check_token.outputs.has_token == 'true'
+        uses: SonarSource/sonarqube-scan-action@v6.0.0
         env:
           SONAR_TOKEN: ${{ secrets.ISSUES_TOOL }}
         with:
