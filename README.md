@@ -1,53 +1,207 @@
 # sonar-issue-exporter
 
 ### AI Disclosure and Disclaimer
-I am neither a developer nor affiliated with Sonar. The Python scripts in this repo are vibe-coded with [DeepSeek](https://chat.deepseek.com/) and [Z.ai](https://chat.z.ai/). Prompt history for the scripts is in [/archive](https://github.com/amokprime/sonar-issue-exporter/tree/main/archive). I have only tested the scripts with GitHub on Windows 11 (0.1.0-0.2.0) and Fedora 44 KDE (0.2.1+). They might also work for repos on GitLab, Bitbucket, and Azure Cloud on any OS where Python is supported.
+I am neither a developer nor affiliated with Sonar. The Python scripts in this repo are vibe-coded with [DeepSeek](https://chat.deepseek.com/) and [Z.ai](https://chat.z.ai/). Prompt history for the scripts is in [/archive](https://github.com/amokprime/sonar-issue-exporter/tree/main/archive). I have only tested the scripts with GitHub on Windows 11 (0.1.0-0.2.0) and Fedora 44 KDE (0.2.1+, including the 1.0.0 single-file refactor). They might also work for repos on GitLab, Bitbucket, and Azure Cloud on any OS where Python is supported.
 
 sonar-issues-exporter is not an official Sonar product. It is a client tool that fetches data from the SonarQube Cloud [Web API](https://docs.sonarsource.com/sonarqube-cloud/appendices/web-api). Users must have their own authorized SonarCloud account and API token. Rule descriptions and educational content are the intellectual property of SonarSource SA. This tool does not bundle or redistribute SonarSource content (see .gitignore).
 
 ### About
-sonar-issue-exporter is a tool for downloading SonarQube Cloud issues to text files that an AI can read. It was created to help fix maintainability issues in my other vibe-coded app (LineByLine).
 
-### Setup
+sonar-issue-exporter is a CLI tool to download Sonar issues. These issues can be generated automatically by SonarCloud GitHub Actions to quality control vibecoded projects (like this one).
 
-#### SonarCloud GitHub Action
+## Setup
+
+### SonarCloud GitHub Action
 1. Add a SonarCloud analysis GitHub workflow to your GitHub repo. Follow the instructions in the sonarcloud.yml template.
 2. Go to your repo Settings/Rules/Rulesets → Require code scanning results and add SonarCloud. It should now scan before any commit.
 3. For private projects, go to your SonarQube Cloud account → Security (shield icon) in left ribbon → Generate Tokens → Enter some name you'll remember → Copy the token and save it to a password manager like KeepassXC
 
-#### Installation
-1. Install [Python 3.10+](https://www.python.org/downloads/) and [uv](https://docs.astral.sh/uv/getting-started/installation/)
-2. Install sonar-issue-exporter:
+### Installation
+
+Run this on Linux:
 ```sh
-git clone https://github.com/amokprime/sonar-issue-exporter.git
-cd sonar-issue-exporter
-uv tool install ".[markdown]"
+mkdir -p ~/.local/bin && \
+  curl -fsSL https://raw.githubusercontent.com/amokprime/sonar-issue-exporter/main/sie.py \
+  -o ~/.local/bin/sie && chmod +x ~/.local/bin/sie
 ```
-3. Create an `.env` file in your home folder (i.e. `%USERNAME%`, `~`). For private projects, paste your token between the quotes and save. The tool searches for `.env` in the current directory, then your home folder. If `FETCH_PATH` is not set, downloaded files go to the current working directory.
-```env
-BEARER_TOKEN="your-token-here"
-FETCH_PATH="/path/to/downloads"
+
+If `~/.local/bin` isn't on `PATH` yet, add `export PATH="$HOME/.local/bin:$PATH"` to your `~/.bashrc` (or `~/.zshrc`, or `set -gx PATH ~/.local/bin $PATH` in fish). The troubleshooting section below covers this in more detail.
+
+Then check:
+```sh
+sie --version   # should print: sie 1.0.0
+sie --help      # full usage + examples
 ```
-4. Update the tool:
+
+### Configuration
+
+To see the "Why" or "How to fix it?" Sonar messages, set your API key in your shell environment:
+```sh
+# fish (~/.config/fish/config.fish):
+set -gx SONAR_API_KEY (kwallet-query -f ksshaskpass -r Sonar kdewallet | string trim)
+
+# bash/zsh (~/.bashrc or ~/.zshrc):
+export SONAR_API_KEY="your-token-here"
+```
+
+`sie` checks `SONAR_API_KEY` first (preferred), then `SONAR_TOKEN` (SonarQube convention fallback). No file-based config — keys must be in the shell environment.
+
+For public projects, you can skip the token entirely — `sie` will run in "public-project mode" and still enumerate issues and facets. The why/how rule-rationale subsections will render placeholders (rule rationale requires `api/rules/show`, which needs auth). See [docs/auth-boundary.md](docs/auth-boundary.md) for the full auth boundary table.
+
+#### Updating
+
+**If you installed via the one-liner** (no clone), just re-run it to pull the latest `main`:
+```sh
+curl -fsSL https://raw.githubusercontent.com/amokprime/sonar-issue-exporter/main/sie.py \
+  -o ~/.local/bin/sie && chmod +x ~/.local/bin/sie
+sie --version           # confirm new version
+```
+
+**If you installed from a clone**, pull and reinstall:
 ```sh
 cd /path/to/sonar-issue-exporter
 git pull
-uv tool install --force --no-cache ".[markdown]"
+install -Dm755 sie.py ~/.local/bin/sie   # or: cp sie.py ~/.local/bin/sie && chmod +x ~/.local/bin/sie
+sie --version           # confirm new version
 ```
 
-### Usage
+## Usage
 
-#### Clipboard watcher
-1. Open a Sonar page with issues.
-2. Run `sonar-watch` from a terminal
-3. `Alt+Tab` back to the Sonar page. Copy each issue's link (on Firefox, right click the blue titles and press `L`, scrolling down as needed) and wait for the download to finish. Issues of the same category are automatically deduplicated into a single folder. Each category folder contains:
-	1. L{line number}.json - "Where is the issue?". Possibly more than one of these.
-	2. why.md - "Why is this an issue?" At most one of these.
-	3. how.md - "How can I fix it?" At most one of these.
-4. Close the terminal window or press `Ctrl+C` when finished.
-5. Upload the folders (as a zip) and their associated app file(s) to a free AI web chat like chat.z.ai or claude.ai. Ask them to include the line affected (i.e. L303) so you can `Ctrl+F` the Sonar project Issues page. Update each unchanged (i.e. "Won't Fix", "defer until refactor") issue's status from Open to "Accept" or "False Positive". If the AI fixed an issue, leave the status Open instead of changing to "Fixed". The next scan should not flag the same instances of the same issues.
+### Quick start
 
-#### CLI
+The most common commands for public projects (no `gh` auth needed):
 ```sh
-sonar-export "https://sonarcloud.io/project/issues?open=ISSUE_KEY&id=PROJECT_KEY"
+sie amokprime/sonar-issue-exporter                    # author/reponame fetch issues → sonar-issues.md
+sie -s amokprime/sonar-issue-exporter                 # quick triage → stdout (no file)
+sie 'https://github.com/amokprime/linebyline/pull/11' # GitHub PR URL
+sie -c amokprime/linebyline                           # clean export (drops licensed Why/How)
+sie -d                                                # diagnose token env var
 ```
+
+All of the above work without `gh` installed. The input can be a SonarCloud URL, GitHub URL, fuzzy `owner/repo[/branch]`, or (from inside a repo) a single-token shortcut. See [docs/input-forms.md](docs/input-forms.md) for the full input-form reference.
+
+### Full reference
+
+```sh
+sie -h                 # short usage
+sie -v                 # version
+sie -s [INPUT]         # cheap triage -> stdout (no file)
+sie [INPUT] [OUTPUT]   # full export -> Markdown
+sie -c [INPUT] [OUTPUT]  # clean export (drops licensed Why/How sections)
+sie -m [FOLDER] [OUTPUT]  # migrate a 0.2.x issues folder
+sie -d                 # diagnose token env var visibility
+```
+
+**Quick triage** (`-s` / `--summary`): fetches facets + total count only (one API call), prints a compact rule × severity × count table to stdout, writes no file. No auth required for public projects.
+
+**Clean mode** (`-c` / `--clean`): silently drops the Why/How rule-rationale subsections from the Markdown output — no placeholder, no warning. Use this to avoid pushing possibly-licensed Sonar content to a chat. See [docs/clean-mode.md](docs/clean-mode.md).
+
+**Local-folder migration** (`-m` / `--migrate`): converts an existing 0.2.x per-issue folder export to the single-file Markdown format, nondestructively. See [docs/local-migration.md](docs/local-migration.md).
+
+**Output paths**: when no explicit output path is given, `sie` writes to `scratch/` (if at a git root), else cwd (if in a git project), else `~/Downloads/` (last resort). Auto-incrementing: `sonar-issues.md` → `sonar-issues1.md` → `sonar-issues2.md`. See [docs/output-paths.md](docs/output-paths.md) for the full resolution rules and positional disambiguation.
+
+### Output format
+
+A single Markdown file with this structure:
+```markdown
+# SonarQube Issues — <project> (<scope>)
+
+Generated: 2026-09-10 00:17 UTC
+Source: `<input — the original URL, fuzzy string, or local path>`
+Total: 42 issue(s) across 8 rule(s)
+Token: present | absent
+
+> ⚠ **No token set** — why/how rule-rationale subsections render as placeholders.
+  (This block only appears when no token is available.)
+
+---
+
+## ★ Focal Issue                    # only when ?open=<KEY> was in the URL
+
+- **Key:** `AaBprftR68fRE0gxBFjx`
+- **Rule:** `shelldre:S7682`
+- **File:** `ai/chat.z.ai/scripts/build.sh:2`
+- **Severity:** MAJOR · **Type:** CODE_SMELL · **Status:** OPEN
+- **Message:** Add an explicit return statement at the end of the function.
+
+ [Open in SonarCloud](https://sonarcloud.io/project/issues?open=AaBprftR68fRE0gxBFjx&id=amokprime_linebyline)
+ See rule section: [`shelldre:S7682`](#shelldre-s7682)
+
+---
+
+## Summary
+
+| Severity   | Count |   | Type          | Count |
+|------------|-------|---|---------------|-------|
+| CRITICAL   | 4     |   | CODE_SMELL    | 42    |
+| MAJOR      | 31    |   |               |       |
+| MINOR      | 7     |   |               |       |
+
+Top rules:
+- `javascript:S2681` — 15×
+- `javascript:S8786` — 10×
+- ...
+
+---
+
+## Rule: `shelldre:S7682` — <rule name>
+
+Severity: MAJOR: 5 · Type: CODE_SMELL: 5 · CleanCode: LOGICAL: 5 · 5 instance(s)
+
+### Why
+<rule rationale — fetched via api/rules/show when token present, else placeholder>
+
+### How to fix
+<fix guidance — fetched via api/rules/show when token present, else placeholder>
+
+### Instances
+
+| File | Line | Message | Key | Status |
+|------|------|---------|-----|--------|
+| `ai/chat.z.ai/scripts/build.sh` | L2 | Add an explicit return statement... | `AaBprfwD68fRE0gxBFj3` | OPEN |
+| ... | ... | ... | ... | ... |
+
+Deep links: `https://sonarcloud.io/project/issues?open=<KEY>&id=<PROJECT>`
+
+---
+
+## Rule: `javascript:S2681` — ...
+...
+```
+
+### Troubleshooting
+
+#### `sie --version` prints nothing / "command not found"
+- Check `~/.local/bin` is on your `PATH`: `echo $PATH | grep -o '\.local/bin'`
+- If missing, add `export PATH="$HOME/.local/bin:$PATH"` to `~/.bashrc` (or `~/.zshrc`).
+
+#### Why/how sections show "⚠ Set SONAR_TOKEN" placeholder
+- Rule rationale (`api/rules/show`) requires auth. Set `SONAR_API_KEY` (or `SONAR_TOKEN` as fallback) in your shell environment.
+- Public-project issue enumeration works without a token — only the why/how content is gated.
+
+#### `sie pr` errors with "requires the GitHub CLI (`gh`)"
+- The `pr` shortcut invokes `gh pr list` to find the most recent open PR. Install `gh` from https://cli.github.com, then `gh auth login`. In other words, it only works on your *own* repos.
+- For a specific PR without `gh`, use the GitHub PR URL form: `sie https://github.com/owner/repo/pull/11`.
+
+#### `sie` (no arg) errors with "Could not discover GitHub repo info from cwd"
+- `sie` tried `./package.json`, `./pyproject.toml`, and `git remote get-url origin`, and none yielded a GitHub URL.
+- Either run `sie` from inside a repo, or pass an explicit input: `sie amokprime/linebyline` or `sie 'https://...'`.
+
+#### Full export shows "0 issue(s)" but I see issues on the SonarCloud UI
+- Check the URL's `issueStatuses=` param — `sie` defaults to `OPEN` if not set. Closed issues won't appear unless you pass `&issueStatuses=OPEN,CONFIRMED,CLOSED` in a SonarCloud API URL.
+- For PR-scoped exports, make sure `&pullRequest=N` is in the URL — main-branch issues won't show up on a PR-scoped fetch.
+- For branch-scoped exports, the branch name must match what SonarCloud indexed. Check the SonarCloud UI for the exact branch name (case-sensitive).
+
+#### Single-issue URL (`?open=<KEY>&id=<PROJECT>`) shows the Focal Issue callout but no instances below
+- This means the focal issue lookup returned 0 results — likely the auth-boundary case (single-issue `?issues=<KEY>` lookup requires auth). `sie` automatically falls back to fetching the whole project's OPEN issues; if that also returns 0, the issue may be CLOSED or on a different branch/PR than the URL implies.
+
+### Token detection issues (KWallet, fish shell, "absent despite being set")
+See [docs/troubleshooting-token.md](docs/troubleshooting-token.md) for the `sie -d` diagnostic and common causes (env var not exported, KWallet locked, non-shell contexts, universal var not loaded).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, the web chat deployment pipeline, and agent-facing docs.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

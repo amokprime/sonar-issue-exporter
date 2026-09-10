@@ -8,6 +8,7 @@ Thumbs.db
 *.swo
 *~
 .directory
+.hidden
 
 # KDE/Kate
 .kate-swp
@@ -24,6 +25,8 @@ Thumbs.db
 
 # Python
 __pycache__/
+.pytest_cache
+.venv
 *.pyc
 build/
 *.egg-info/
@@ -38,5 +41,5 @@ npm-debug.log*
 ROADMAP.md
 why.md
 how.md
-local
+scratch
 trash

@@ -4,27 +4,69 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sonar-issue-exporter"
-version = "0.2.2"
-description = "Export SonarQube Cloud issues to AI-readable text files"
+version = "1.0.0"
+description = "Export SonarQube Cloud issues to a single Markdown file"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-dependencies = [
-    "requests>=2.33.0",
-    "pyperclip",
-]
+# Zero runtime dependencies — sie.py is pure Python 3.10+ stdlib.
+# This is a deliberate design choice: the script is portable as a single
+# `~/.local/bin/sie` executable with no install step beyond `cp + chmod`.
+dependencies = []
 
 [project.optional-dependencies]
-markdown = ["html2text"]
+# Dev-only deps. Not required to run sie.py — only to run the test suite.
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.15",
+]
 
 [project.scripts]
-sonar-export = "export_sonar_issue:main"
-sonar-watch = "watch_clipboard:main"
+# v1.0.0 install is `install -Dm755 sie.py ~/.local/bin/sie` — no build step.
+# This entry point exists only for backwards compat with `uv tool install`
+# users who haven't run `sie-migrate.sh` yet. New installs should use the
+# single-file route documented in README.md.
+sie = "sie:main"
 
 [tool.setuptools]
-py-modules = ["export_sonar_issue", "watch_clipboard"]
+py-modules = ["sie"]
 
 [dependency-groups]
 dev = [
-    "ruff>=0.15.20",
+    "pytest>=8.0",
+    "ruff>=0.15",
 ]
+
+[tool.ruff]
+# Linter + formatter config for sie.py.
+line-length = 100
+extend-exclude = [
+    "archive/**",
+    ".venv",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+# Ruff gate. Cognitive complexity (S3776, threshold 15) is the canonical
+# SonarCloud check; ruff's C901 (mccabe complexity, default threshold 10)
+# is a complementary structural gate that catches deeply-nested functions
+# SonarCloud's cognitive metric doesn't always flag. Both are intentionally
+# selected — they measure different things, and a function that exceeds
+# EITHER metric warrants a refactor.
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes (unused imports, undefined names)
+    "I",    # isort (import ordering)
+    "C90",  # mccabe complexity (default threshold 10)
+    "UP",   # pyupgrade (modernize syntax)
+    "B",    # flake8-bugbear (common pitfalls)
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+# conftest.py adds the repo root to sys.path, so `import sie` works
+# without installing the package.
