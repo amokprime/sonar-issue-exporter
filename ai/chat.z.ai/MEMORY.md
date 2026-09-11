@@ -166,6 +166,18 @@ SonarCloud's `shell:S8541` flags `uv run` and `uv sync` commands that omit `--no
 
 `--no-build` alone doesn't work for editable installs (the project itself needs building). `--only-binary :all:` is a pip flag, not a uv flag. The `--no-install-project` + `--no-build` combination is the uv-native equivalent.
 
+## GitHub CodeQL `py/incomplete-url-substring-sanitization` (fixed v1.0.0)
+
+CodeQL flagged `resolve_input` at two locations for substring checks on unparsed URLs: `"sonarcloud.io" in raw` and `"github.com" in raw`. The bypass: a URL like `https://evil-example.net/sonarcloud.io` would pass the substring check (because `sonarcloud.io` appears as a substring) but the actual host is `evil-example.net`. The fix: dispatch on `urllib.parse.urlparse(raw).netloc` (the parsed hostname), not substring matching on the raw URL string. Tests: `tests/test_input_resolver.py::TestResolveUrlInputs::test_url_with_evil_host_embedded_in_path_does_not_bypass_dispatch` and `test_url_with_github_in_path_does_not_bypass_dispatch`.
+
+## GitHub code-scanning URL form (`/security/code-scanning/<N>`)
+
+`sie` accepts `https://github.com/owner/repo/security/code-scanning/<N>` URLs. These are GitHub code-scanning alerts (CodeQL etc.), fetched via `gh api repos/owner/repo/code-scanning/alerts/<N>` — NOT the SonarCloud pipeline. The descriptor carries a `code_scanning_alert` field so `export_url` routes to the GitHub pipeline (`_run_code_scanning_mode` → `fetch_code_scanning_alert` → `render_code_scanning_markdown`).
+
+Requires `gh` + `gh auth login` (same as the `sie pr` shortcut). The alert is converted to the issue-dict shape (`_code_scanning_alert_to_issue`) and rendered with `render_markdown` (scope `"code-scanning"` → display "GitHub code-scanning"). Synthetic key is `codeql:<alert_number>` so it's visually distinct from SonarCloud issue keys.
+
+**Dedup vs SonarCloud**: no risk. CodeQL alerts (the `py/*`, `js/*` rules) don't appear in SonarCloud at all — they're a separate scanner. SonarCloud issues appear in SonarCloud's UI and in GitHub's code-scanning view (if the SonarCloud GitHub Action is configured), but a code-scanning URL fetches only the specific alert by number — it doesn't sweep the SonarCloud issue list. So passing a SonarCloud URL fetches SonarCloud issues; passing a code-scanning URL fetches one CodeQL alert. No overlap.
+
 ## Versioning
 
 Patch releases for `sie` (e.g. 1.0.0 → 1.0.1) are for bug fixes and small enhancements. Minor version bumps (1.0.x → 1.1.0) are for new features that change the CLI surface or output format. Major version bumps (1.x.y → 2.0.0) are reserved for breaking changes that require a fresh migration. The version is hardcoded at the top of `sie.py` as `VERSION = "1.0.0"` — update it in lockstep with the `pyproject.toml` `version` field and the `README.md` references.

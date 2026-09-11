@@ -102,6 +102,40 @@ class TestGithubCommit:
             )
 
 
+class TestGithubCodeScanning:
+    """GitHub code-scanning alert URLs (/security/code-scanning/<N>).
+
+    These are repo-level alerts (CodeQL etc.), fetched via `gh api` rather
+    than the SonarCloud pipeline. The descriptor carries a
+    `code_scanning_alert` field so `export_url` routes to the GitHub pipeline.
+    """
+
+    def test_code_scanning_url_sets_alert_field(self):
+        d = sie.parse_github_url(
+            "https://github.com/amokprime/sonar-issue-exporter/security/code-scanning/3"
+        )
+        assert d["project"] == "amokprime_sonar-issue-exporter"
+        assert d["code_scanning_alert"] == 3
+        assert d["scope"] == "main"  # repo-level alert, not branch-scoped
+
+    def test_code_scanning_url_preserves_source(self):
+        raw = "https://github.com/amokprime/sonar-issue-exporter/security/code-scanning/4"
+        d = sie.parse_github_url(raw)
+        assert d["source"] == raw
+
+    def test_code_scanning_url_with_www_subdomain(self):
+        d = sie.parse_github_url(
+            "https://www.github.com/amokprime/sonar-issue-exporter/security/code-scanning/1"
+        )
+        assert d["code_scanning_alert"] == 1
+
+    def test_invalid_alert_number_raises(self):
+        with pytest.raises(ValueError, match="Invalid code-scanning alert number"):
+            sie.parse_github_url(
+                "https://github.com/amokprime/sonar-issue-exporter/security/code-scanning/abc"
+            )
+
+
 class TestGithubUrlErrors:
     def test_non_github_host_raises(self):
         with pytest.raises(ValueError, match="Not a github.com URL"):

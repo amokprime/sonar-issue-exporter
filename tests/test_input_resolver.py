@@ -47,6 +47,28 @@ class TestResolveUrlInputs:
                 cwd=Path("/tmp"),
             )
 
+    def test_url_with_evil_host_embedded_in_path_does_not_bypass_dispatch(self):
+        """CodeQL py/incomplete-url-substring-sanitization regression test.
+
+        A URL like `https://evil-example.net/sonarcloud.io` would have passed
+        the old substring check (`"sonarcloud.io" in raw`), but urlparse
+        correctly identifies the host as `evil-example.net`, so it falls
+        through to the unsupported-host error.
+        """
+        with pytest.raises(ValueError, match="Unsupported URL host"):
+            sie.resolve_input(
+                "https://evil-example.net/sonarcloud.io",
+                cwd=Path("/tmp"),
+            )
+
+    def test_url_with_github_in_path_does_not_bypass_dispatch(self):
+        """Same CodeQL fix for the github.com branch of the dispatch."""
+        with pytest.raises(ValueError, match="Unsupported URL host"):
+            sie.resolve_input(
+                "https://evil-example.net/github.com/amokprime/linebyline",
+                cwd=Path("/tmp"),
+            )
+
 
 class TestResolveFuzzyOwnerRepo:
     def test_owner_repo_maps_to_main(self):

@@ -488,6 +488,121 @@ def fetch_rule_md(
 
 
 # ---------------------------------------------------------------------------
+# GitHub code-scanning alerts (via `gh api` — requires GitHub CLI auth)
+# ---------------------------------------------------------------------------
+
+def fetch_code_scanning_alert(
+    owner: str, repo: str, alert_num: int,
+) -> dict:
+    """Fetch a single GitHub code-scanning alert via `gh api`.
+
+    Mirrors the ``sie pr`` pattern: requires the GitHub CLI (``gh``) with
+    ``gh auth login`` done. The repo must be public (or the user must have
+    access via their ``gh`` token).
+
+    Returns the raw alert JSON (per the GitHub code-scanning alerts API).
+    Raises ``RuntimeError`` if ``gh`` isn't installed, the API call fails,
+    or the response isn't valid JSON.
+    """
+    if not shutil.which("gh"):
+        raise RuntimeError(
+            "GitHub code-scanning alerts require the GitHub CLI (`gh`). "
+            "Install from https://cli.github.com, then `gh auth login`. "
+            "For SonarCloud issues, use the SonarCloud URL form instead."
+        )
+    api_path = f"repos/{owner}/{repo}/code-scanning/alerts/{alert_num}"
+    try:
+        proc = subprocess.run(
+            ["gh", "api", api_path],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError) as e:
+        raise RuntimeError(f"`gh api {api_path}` invocation failed: {e}") from e
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip()
+        raise RuntimeError(
+            f"`gh api {api_path}` failed (exit {proc.returncode}): {stderr}"
+        )
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"`gh api {api_path}` returned non-JSON output: {e}"
+        ) from e
+
+
+def _code_scanning_alert_to_issue(alert: dict) -> dict:
+    """Convert a GitHub code-scanning alert JSON to a sie issue dict.
+
+    Maps the alert's fields to the ``KEEP_FIELDS`` shape so
+    ``render_markdown`` can render it without branching on the source.
+    The ``key`` is a synthetic ``codeql:<alert_number>`` so it's visually
+    distinct from SonarCloud issue keys.
+    """
+    rule = alert.get("rule", {})
+    instance = alert.get("most_recent_instance", {})
+    location = instance.get("location", {})
+    return {
+        "rule": rule.get("id", "?"),
+        "component": location.get("path", "?"),
+        "line": location.get("start_line"),
+        "textRange": {
+            "startLine": location.get("start_line"),
+            "endLine": location.get("end_line"),
+            "startOffset": location.get("start_column"),
+            "endOffset": location.get("end_column"),
+        },
+        "message": instance.get("message", {}).get("text", ""),
+        "severity": rule.get("severity", "warning").upper(),
+        "type": "CODE_SMELL",
+        "cleanCodeAttribute": "FOCUSED",
+        "cleanCodeAttributeCategory": "ADAPTABLE",
+        "impacts": [],
+        "flows": [],
+        "status": alert.get("state", "open").upper(),
+        "key": f"codeql:{alert.get('number', '?')}",
+    }
+
+
+def _code_scanning_rule_to_meta(alert: dict) -> dict:
+    """Extract rule metadata (why/how) from a code-scanning alert.
+
+    The alert's ``rule.help`` field is markdown — use it as the ``why``
+    content. There's no separate "how to fix" section in the GitHub API;
+    the help text usually contains both the explanation and remediation.
+    """
+    rule = alert.get("rule", {})
+    help_text = rule.get("help", "")
+    return {"why": help_text, "how": ""}
+
+
+def render_code_scanning_markdown(
+    *, source: str, owner: str, repo: str, alert: dict,
+) -> str:
+    """Render a single GitHub code-scanning alert as a sie-style Markdown report.
+
+    Reuses ``render_markdown`` by converting the alert to the issue-dict
+    shape. The report has one rule section with one instance (the alert
+    location), plus the rule's help text as the Why section.
+    """
+    issue = _code_scanning_alert_to_issue(alert)
+    rule_meta = _code_scanning_rule_to_meta(alert)
+    project = f"{owner}_{repo}"
+    return render_markdown(
+        source=source,
+        project=project,
+        scope="code-scanning",
+        issues=[issue],
+        facets={},
+        rules={issue["rule"]: rule_meta},
+        token_present=True,
+        focal_key=issue["key"],
+        is_local_migration=False,
+        clean=False,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Local-folder parser (migration from existing 0.2.x per-issue exports)
 # ---------------------------------------------------------------------------
 
@@ -690,6 +805,8 @@ def _scope_display(scope: str) -> str:
         return f"branch `{scope[7:]}`"
     if scope == "local-export":
         return "local export"
+    if scope == "code-scanning":
+        return "GitHub code-scanning"
     return scope
 
 
@@ -1182,11 +1299,21 @@ def resolve_input(
         return descriptor
 
     if looks_like_url(raw):
-        if "sonarcloud.io" in raw:
+        # Dispatch on the parsed URL's netloc, NOT substring matching on the
+        # raw URL string. CodeQL's `py/incomplete-url-substring-sanitization`
+        # flags substring checks (e.g. `"sonarcloud.io" in raw`) because a
+        # malicious URL like `http://evil-example.net/sonarcloud.io` would
+        # pass the check. urlparse extracts the actual hostname, which is
+        # what we want to match against.
+        parsed = urllib.parse.urlparse(raw)
+        host = parsed.netloc.lower()
+        # Strip port if present (e.g. "sonarcloud.io:443" → "sonarcloud.io").
+        host = host.split(":", 1)[0]
+        if host in ("sonarcloud.io", "www.sonarcloud.io"):
             descriptor = parse_url_input(raw)
             descriptor["source"] = raw
             return descriptor
-        if "github.com" in raw:
+        if host in ("github.com", "www.github.com"):
             descriptor = parse_github_url(raw)
             descriptor["source"] = raw
             return descriptor
@@ -1214,15 +1341,84 @@ def resolve_input(
     return descriptor
 
 
+def _parse_github_scoping_path(
+    parts: list[str], project: str, raw: str,
+) -> dict | None:
+    """Parse the path-segment scoping (``/pull/N``, ``/tree/branch``, ``/blob/...``,
+    ``/security/code-scanning/N``, ``/commit/<sha>``) into a descriptor, or
+    return ``None`` if no scoping pattern matches (caller falls back to main).
+
+    Extracted from ``parse_github_url`` to keep cognitive complexity under
+    the S3776 / C901 thresholds.
+    """
+    # /owner/repo/pull/<N>
+    if len(parts) >= 4 and parts[2] == "pull":
+        try:
+            pr_num = int(parts[3])
+        except ValueError as e:
+            raise ValueError(
+                f"Invalid PR number in GitHub URL: {parts[3]!r}"
+            ) from e
+        return _build_descriptor(
+            project=project, scope=f"pr:{pr_num}", pull_request=pr_num,
+        )
+
+    # /owner/repo/tree/<branch>  — branch may contain slashes
+    # (e.g. feature/sync-rewrite), so join everything from parts[3] onward.
+    if len(parts) >= 4 and parts[2] == "tree":
+        branch = "/".join(parts[3:])
+        return _build_descriptor(
+            project=project, scope=f"branch:{branch}", branch=branch,
+        )
+
+    # /owner/repo/blob/<branch>/<path>  — only the first segment after
+    # /blob/ is the branch; the rest is the file path. GitHub branch names
+    # can technically contain slashes, but a blob URL's branch is always a
+    # single segment because the path after it is what's being viewed. If
+    # the branch actually has a slash, use the /tree/ URL form instead.
+    if len(parts) >= 4 and parts[2] == "blob":
+        return _build_descriptor(
+            project=project, scope=f"branch:{parts[3]}", branch=parts[3],
+        )
+
+    # /owner/repo/security/code-scanning/<N> — GitHub code-scanning alert.
+    # Repo-level alerts (not branch-scoped); the SonarCloud fetch is skipped
+    # — we fetch the alert directly via `gh api` instead. The descriptor
+    # carries a `code_scanning_alert` field so export_url routes to the
+    # GitHub pipeline rather than the SonarCloud pipeline.
+    if len(parts) >= 5 and parts[2] == "security" and parts[3] == "code-scanning":
+        try:
+            alert_num = int(parts[4])
+        except ValueError as e:
+            raise ValueError(
+                f"Invalid code-scanning alert number in GitHub URL: {parts[4]!r}"
+            ) from e
+        descriptor = _build_descriptor(project=project, scope="main")
+        descriptor["code_scanning_alert"] = alert_num
+        descriptor["source"] = raw
+        return descriptor
+
+    # /owner/repo/commit/<sha> — SonarCloud doesn't index arbitrary SHAs.
+    if len(parts) >= 4 and parts[2] == "commit":
+        raise ValueError(
+            f"Commit-SHA URLs are not supported (SonarCloud indexes branches "
+            f"and PRs, not arbitrary commits). Use a branch URL instead: "
+            f"https://github.com/{parts[0]}/{parts[1]}/tree/<branch>."
+        )
+
+    return None
+
+
 def parse_github_url(raw: str) -> dict:
     """Parse a GitHub URL into a SonarCloud API descriptor.
 
     Recognized path patterns:
-      - ``/owner/repo``                     → main branch
-      - ``/owner/repo/pull/<N>``            → ``?pullRequest=<N>``
-      - ``/owner/repo/tree/<branch>``       → ``?branch=<branch>``
-      - ``/owner/repo/blob/<branch>/...``   → ``?branch=<branch>``
-      - ``/owner/repo/commit/<sha>``        → error (SonarCloud doesn't index SHAs)
+      - ``/owner/repo``                              → main branch
+      - ``/owner/repo/pull/<N>``                     → ``?pullRequest=<N>``
+      - ``/owner/repo/tree/<branch>``               → ``?branch=<branch>``
+      - ``/owner/repo/blob/<branch>/...``            → ``?branch=<branch>``
+      - ``/owner/repo/security/code-scanning/<N>``   → GitHub code-scanning alert
+      - ``/owner/repo/commit/<sha>``                 → error (SonarCloud doesn't index SHAs)
 
     The SonarCloud project key is derived as ``<owner>_<repo>`` (the
     convention for GitHub-integrated SonarCloud projects). Repos with
@@ -1244,47 +1440,9 @@ def parse_github_url(raw: str) -> dict:
         repo = repo[:-4]
     project = f"{owner}_{repo}"
 
-    # /owner/repo/pull/<N>
-    if len(parts) >= 4 and parts[2] == "pull":
-        try:
-            pr_num = int(parts[3])
-        except ValueError as e:
-            raise ValueError(
-                f"Invalid PR number in GitHub URL: {parts[3]!r}"
-            ) from e
-        return _build_descriptor(
-            project=project, scope=f"pr:{pr_num}",
-            pull_request=pr_num,
-        )
-
-    # /owner/repo/tree/<branch>  — branch may contain slashes
-    # (e.g. feature/sync-rewrite), so join everything from parts[3] onward.
-    if len(parts) >= 4 and parts[2] == "tree":
-        branch = "/".join(parts[3:])
-        return _build_descriptor(
-            project=project, scope=f"branch:{branch}",
-            branch=branch,
-        )
-
-    # /owner/repo/blob/<branch>/<path>  — only the first segment after
-    # /blob/ is the branch; the rest is the file path. GitHub branch names
-    # can technically contain slashes, but a blob URL's branch is always a
-    # single segment because the path after it is what's being viewed. If
-    # the branch actually has a slash, use the /tree/ URL form instead.
-    if len(parts) >= 4 and parts[2] == "blob":
-        branch = parts[3]
-        return _build_descriptor(
-            project=project, scope=f"branch:{branch}",
-            branch=branch,
-        )
-
-    # /owner/repo/commit/<sha> — SonarCloud doesn't index arbitrary SHAs.
-    if len(parts) >= 4 and parts[2] == "commit":
-        raise ValueError(
-            f"Commit-SHA URLs are not supported (SonarCloud indexes branches "
-            f"and PRs, not arbitrary commits). Use a branch URL instead: "
-            f"https://github.com/{owner}/{repo}/tree/<branch>."
-        )
+    scoped = _parse_github_scoping_path(parts, project, raw)
+    if scoped is not None:
+        return scoped
 
     # /owner/repo — default to main.
     return _build_descriptor(project=project, scope="main")
@@ -1678,6 +1836,42 @@ def _fetch_rule_metadata(
     return rules
 
 
+def _run_code_scanning_mode(
+    descriptor: dict, *, output_path: str | None, cwd: Path | None,
+) -> int:
+    """Fetch + render a single GitHub code-scanning alert via `gh api`.
+
+    Extracted from ``export_url`` to keep cognitive complexity under S3776.
+    The descriptor must carry ``code_scanning_alert`` (the alert number)
+    and ``owner``/``repo`` (stashed by ``parse_github_url``).
+    """
+    # Recover owner/repo from the project key (``<owner>_<repo>``).
+    project = descriptor["project"]
+    owner, _, repo = project.partition("_")
+    alert_num = descriptor["code_scanning_alert"]
+    source = descriptor.get("source", "")
+    print(
+        f"Project: {project}  Code-scanning alert: #{alert_num}",
+        file=sys.stderr,
+    )
+    print("Fetching alert via `gh api`…", file=sys.stderr)
+    try:
+        alert = fetch_code_scanning_alert(owner, repo, alert_num)
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+    markdown = render_code_scanning_markdown(
+        source=source, owner=owner, repo=repo, alert=alert,
+    )
+    out_path = resolve_output_path(
+        explicit=output_path,
+        base_dir=_resolve_default_output_dir(cwd or Path.cwd()),
+    )
+    out_path.write_text(markdown, encoding="utf-8")
+    print(f"\nWrote: {out_path}", file=sys.stderr)
+    return 0
+
+
 def export_url(
     descriptor: dict,
     *,
@@ -1692,16 +1886,26 @@ def export_url(
     ``parse_url_input`` / ``parse_github_url`` / ``_build_descriptor``):
     ``{api_url, project, scope, focal_key}``.
 
+    If the descriptor carries a ``code_scanning_alert`` field (set when the
+    input was a ``https://github.com/owner/repo/security/code-scanning/<N>``
+    URL), this routes to the GitHub code-scanning pipeline (``gh api``)
+    instead of the SonarCloud pipeline.
+
     ``cwd`` is used to resolve the default output directory via
     ``_resolve_default_output_dir``. If ``None``, defaults to ``Path.cwd()``.
 
     Returns the process exit code (0 on success, 2 on API error).
 
     The pipeline is assembled from helpers, each handling one phase
-    (summary mode, issue fetch + focal fallback, rule-metadata fetch,
-    render + write). Extracted to keep cognitive complexity under the
-    S3776 threshold (15).
+    (code-scanning mode, summary mode, issue fetch + focal fallback,
+    rule-metadata fetch, render + write). Extracted to keep cognitive
+    complexity under the S3776 threshold (15).
     """
+    if "code_scanning_alert" in descriptor:
+        return _run_code_scanning_mode(
+            descriptor, output_path=output_path, cwd=cwd,
+        )
+
     token = get_token()
     api_url = descriptor["api_url"]
     project = descriptor["project"]

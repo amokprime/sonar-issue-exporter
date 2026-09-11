@@ -1,4 +1,4 @@
-## Input forms
+# Input forms
 
 `sie` accepts a flexible set of input forms. The first positional arg is resolved in this priority order:
 
@@ -10,7 +10,7 @@
 
 ---
 
-### 1. SonarCloud URL (UI or API form)
+## 1. SonarCloud URL (UI or API form)
 
 The most explicit form — pass through any SonarCloud URL.
 
@@ -32,7 +32,7 @@ The mapping for UI URLs: `?id=<PROJECT>` becomes `?componentKeys=<PROJECT>` (ren
 
 ---
 
-### 2. GitHub URL (auto-converts to SonarCloud API URL)
+## 2. GitHub URL (auto-converts to SonarCloud API URL)
 
 Lets you copy a URL straight from the GitHub UI. `sie` derives the SonarCloud project key as `<owner>_<repo>` (the convention for GitHub-integrated SonarCloud projects) and maps the path to the right SonarCloud scope:
 
@@ -42,19 +42,29 @@ Lets you copy a URL straight from the GitHub UI. `sie` derives the SonarCloud pr
 | `/owner/repo/pull/<N>` | `?pullRequest=<N>` |
 | `/owner/repo/tree/<branch>` | `?branch=<branch>` |
 | `/owner/repo/blob/<branch>/...` | `?branch=<branch>` |
+| `/owner/repo/security/code-scanning/<N>` | GitHub code-scanning alert (via `gh api`, not SonarCloud) |
 | `/owner/repo/commit/<sha>` | not supported (SonarCloud indexes branches/PRs, not arbitrary SHAs) |
 
 ```sh
 sie 'https://github.com/amokprime/linebyline/pull/11'         # -> ?pullRequest=11
 sie 'https://github.com/amokprime/linebyline/tree/staging'    # -> ?branch=staging
 sie 'https://github.com/amokprime/linebyline'                 # -> main branch
+sie 'https://github.com/amokprime/sonar-issue-exporter/security/code-scanning/3'  # -> CodeQL alert #3
 ```
+
+### GitHub code-scanning alerts
+
+The `/security/code-scanning/<N>` form fetches a single GitHub code-scanning alert (CodeQL etc.) via `gh api repos/owner/repo/code-scanning/alerts/<N>` and renders it as a `sie`-style Markdown report. This requires the GitHub CLI (`gh`) with `gh auth login` done — same as the `sie pr` shortcut.
+
+These alerts are repo-level (not branch-scoped), so the report scope shows "GitHub code-scanning" and the SonarCloud fetch is skipped entirely. The synthetic key is `codeql:<alert_number>` so it's visually distinct from SonarCloud issue keys.
+
+**No dedup risk vs SonarCloud**: CodeQL alerts (`py/*`, `js/*` rules) don't appear in SonarCloud at all — they're a separate scanner. SonarCloud issues can appear in GitHub's code-scanning view (if the SonarCloud GitHub Action is configured), but a code-scanning URL fetches only the specific alert by number — it doesn't sweep the SonarCloud issue list. So passing a SonarCloud URL fetches SonarCloud issues; passing a code-scanning URL fetches one CodeQL alert. No overlap.
 
 GitHub branch names can contain slashes (e.g. `feature/sync-rewrite`). The `/tree/<branch>` URL form preserves the full branch name across the slash; the `/blob/<branch>/<path>` form has only one segment after `/blob/` as the branch (the rest is the file path).
 
 ---
 
-### 3. Fuzzy `owner/repo[/branch]`
+## 3. Fuzzy `owner/repo[/branch]`
 
 Shorthand for when you know the project but don't want to type a full URL.
 
@@ -65,7 +75,7 @@ sie amokprime/linebyline/staging    # staging branch
 
 ---
 
-### 4. Single-token shortcuts (from inside a repo)
+## 4. Single-token shortcuts (from inside a repo)
 
 When run from inside a repo (i.e. cwd has a `package.json`, `pyproject.toml`, or is a git checkout), `sie` discovers the project automatically and the input can be a single token:
 
@@ -86,7 +96,7 @@ The `pr` shortcut requires the GitHub CLI (`gh`), which is typically not install
 
 ---
 
-### 5. No arg (from inside a repo)
+## 5. No arg (from inside a repo)
 
 ```sh
 cd ~/code/linebyline
@@ -95,7 +105,7 @@ sie           # main branch of cwd's repo (same as `sie main`)
 
 ---
 
-### Repo discovery (for single-token / no-arg modes)
+## Repo discovery (for single-token / no-arg modes)
 
 `sie` discovers the GitHub owner/repo from cwd using these sources, in priority order:
 
