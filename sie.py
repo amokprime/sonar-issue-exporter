@@ -559,6 +559,39 @@ def _register_rule_metadata(
         rules[rule_key]["how"] = how_text
 
 
+def _process_category_dir(
+    category_dir: Path, issues: list[dict], rules: dict[str, dict],
+) -> None:
+    """Process one category subfolder: read why/how, parse each L*.json, register rules.
+
+    Extracted from ``parse_local_export`` to keep cognitive complexity under
+    the S3776 threshold — the nested for>for>if structure was the complexity
+    sink; this helper flattens it to a single for>if chain.
+    """
+    why_text = ""
+    how_text = ""
+    why_path = category_dir / "why.md"
+    how_path = category_dir / "how.md"
+    if why_path.is_file():
+        why_text = why_path.read_text(encoding="utf-8").strip()
+    if how_path.is_file():
+        how_text = how_path.read_text(encoding="utf-8").strip()
+
+    for json_path in sorted(category_dir.iterdir()):
+        m = ISSUE_FILE_RE.match(json_path.name)
+        if not m:
+            continue
+        clean = _parse_issue_from_json(json_path, m)
+        if clean is None:
+            continue
+
+        issues.append(clean)
+        rule_key = clean.get("rule")
+        if not rule_key:
+            continue
+        _register_rule_metadata(rules, rule_key, why_text, how_text)
+
+
 def parse_local_export(folder: Path) -> tuple[list[dict], dict[str, dict]]:
     """Walk a local export folder and collect issues + rule metadata.
 
@@ -591,29 +624,7 @@ def parse_local_export(folder: Path) -> tuple[list[dict], dict[str, dict]]:
     for category_dir in sorted(folder.iterdir()):
         if not category_dir.is_dir():
             continue
-
-        why_text = ""
-        how_text = ""
-        why_path = category_dir / "why.md"
-        how_path = category_dir / "how.md"
-        if why_path.is_file():
-            why_text = why_path.read_text(encoding="utf-8").strip()
-        if how_path.is_file():
-            how_text = how_path.read_text(encoding="utf-8").strip()
-
-        for json_path in sorted(category_dir.iterdir()):
-            m = ISSUE_FILE_RE.match(json_path.name)
-            if not m:
-                continue
-            clean = _parse_issue_from_json(json_path, m)
-            if clean is None:
-                continue
-
-            issues.append(clean)
-            rule_key = clean.get("rule")
-            if not rule_key:
-                continue
-            _register_rule_metadata(rules, rule_key, why_text, how_text)
+        _process_category_dir(category_dir, issues, rules)
 
     return issues, rules
 
@@ -1565,6 +1576,108 @@ def _resolve_most_recent_pr(repo: dict) -> dict:
 # Export pipeline (URL -> fetch -> render -> write)
 # ---------------------------------------------------------------------------
 
+def _run_summary_mode(
+    api_url: str, project: str, scope: str, focal_key: str | None, token: str,
+) -> int:
+    """Cheap triage: fetch facets + first page, print summary to stdout, return exit code.
+
+    Extracted from ``export_url`` to reduce cognitive complexity (S3776).
+    """
+    summary_url = _ensure_facets(api_url)
+    print("Fetching facets + first page…", file=sys.stderr)
+    try:
+        data = _api_get(summary_url, token)
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+    total = int(data.get("total", 0))
+    facets = {
+        f["property"]: f.get("values", [])
+        for f in data.get("facets", []) or []
+    }
+    issues = list(data.get("issues", []))
+    _print_summary_stdout(
+        project=project, scope=scope, total=total,
+        facets=facets, sample_issues=issues[:3],
+    )
+    return 0
+
+
+def _fetch_issues_or_fail(
+    api_url: str, token: str, *, msg: str = "Fetching issues…",
+) -> tuple[list[dict], dict] | None:
+    """Fetch issues + facets, or return ``None`` (after printing the error) on failure.
+
+    Extracted from ``export_url`` to reduce cognitive complexity (S3776) —
+    the try/except blocks were repeating across the main fetch + focal fallback.
+    """
+    print(msg, file=sys.stderr)
+    try:
+        return fetch_issues(api_url, token)
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return None
+
+
+def _fetch_with_focal_fallback(
+    api_url: str, project: str, focal_key: str | None, token: str,
+) -> tuple[list[dict], dict, int | None]:
+    """Fetch issues, falling back to all-OPEN if focal key came up empty.
+
+    Returns ``(issues, facets, exit_code)``. ``exit_code`` is ``None`` on
+    success (caller continues), or an int (caller returns it immediately).
+    """
+    result = _fetch_issues_or_fail(api_url, token)
+    if result is None:
+        return [], {}, 2
+    issues, facets = result
+
+    if focal_key and not issues and project:
+        print(
+            "  focal issue not in initial fetch (likely auth-boundary); "
+            "fetching all OPEN issues for the project…",
+            file=sys.stderr,
+        )
+        fallback_url = _build_api_url({
+            "componentKeys": project,
+            "issueStatuses": "OPEN",
+            "ps": str(PAGE_SIZE),
+        })
+        result = _fetch_issues_or_fail(fallback_url, token, msg="")
+        if result is None:
+            return [], {}, 2
+        issues, facets = result
+
+    return issues, facets, None
+
+
+def _fetch_rule_metadata(
+    issues: list[dict], token: str, clean: bool,
+) -> dict[str, dict]:
+    """Fetch why/how rule metadata for each distinct rule in ``issues``.
+
+    Skipped when ``clean=True`` (the content would be dropped by
+    ``render_markdown`` anyway) or when no token is available.
+    """
+    if not token or clean:
+        return {}
+    distinct_rules = {i.get("rule") for i in issues if i.get("rule")}
+    organization = next(
+        (i.get("organization") for i in issues if i.get("organization")),
+        "",
+    )
+    if distinct_rules:
+        print(
+            f"Fetching rule metadata for {len(distinct_rules)} rule(s)…",
+            file=sys.stderr,
+        )
+    rules: dict[str, dict] = {}
+    for rk in sorted(distinct_rules):
+        why_md, how_md = fetch_rule_md(rk, organization, token)
+        rules[rk] = {"why": why_md, "how": how_md}
+    return rules
+
+
 def export_url(
     descriptor: dict,
     *,
@@ -1583,15 +1696,17 @@ def export_url(
     ``_resolve_default_output_dir``. If ``None``, defaults to ``Path.cwd()``.
 
     Returns the process exit code (0 on success, 2 on API error).
+
+    The pipeline is assembled from helpers, each handling one phase
+    (summary mode, issue fetch + focal fallback, rule-metadata fetch,
+    render + write). Extracted to keep cognitive complexity under the
+    S3776 threshold (15).
     """
     token = get_token()
     api_url = descriptor["api_url"]
     project = descriptor["project"]
     scope = descriptor["scope"]
     focal_key = descriptor.get("focal_key")
-    # ``source`` is what we display in the Markdown header. Prefer the
-    # original input if the caller stashed it in the descriptor; else fall
-    # back to the api_url.
     source = descriptor.get("source", api_url)
 
     print(
@@ -1605,75 +1720,13 @@ def export_url(
     )
 
     if summary_mode:
-        # Cheap triage: add facets to the URL, fetch one page, print summary.
-        summary_url = _ensure_facets(api_url)
-        print("Fetching facets + first page…", file=sys.stderr)
-        try:
-            data = _api_get(summary_url, token)
-        except RuntimeError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 2
-        total = int(data.get("total", 0))
-        facets = {
-            f["property"]: f.get("values", [])
-            for f in data.get("facets", []) or []
-        }
-        issues = list(data.get("issues", []))
-        _print_summary_stdout(
-            project=project, scope=scope, total=total,
-            facets=facets, sample_issues=issues[:3],
-        )
-        return 0
+        return _run_summary_mode(api_url, project, scope, focal_key, token)
 
-    print("Fetching issues…", file=sys.stderr)
-    try:
-        issues, facets = fetch_issues(api_url, token)
-    except RuntimeError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 2
+    issues, facets, rc = _fetch_with_focal_fallback(api_url, project, focal_key, token)
+    if rc is not None:
+        return rc
 
-    # If a focal key was requested but the API returned no issues, that's
-    # likely the auth-boundary case (?issues=<KEY> needs auth). Fall back
-    # to fetching the whole project's OPEN issues and let the renderer
-    # highlight the focal key from the larger list.
-    if focal_key and not issues and project:
-        print(
-            "  focal issue not in initial fetch (likely auth-boundary); "
-            "fetching all OPEN issues for the project…",
-            file=sys.stderr,
-        )
-        fallback_url = _build_api_url({
-            "componentKeys": project,
-            "issueStatuses": "OPEN",
-            "ps": str(PAGE_SIZE),
-        })
-        try:
-            issues, facets = fetch_issues(fallback_url, token)
-        except RuntimeError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 2
-
-    # Fetch rule metadata (why/how) for each distinct rule, when a token
-    # is available AND clean mode is not active. When clean=True, skip the
-    # fetch entirely (the content would be dropped by render_markdown anyway,
-    # so no point hitting the API).
-    rules: dict[str, dict] = {}
-    if token and not clean:
-        distinct_rules = {i.get("rule") for i in issues if i.get("rule")}
-        # Organization: SonarCloud uses the project's organization; the
-        # API returns it on each issue. Use the first non-empty value.
-        organization = next(
-            (i.get("organization") for i in issues if i.get("organization")),
-            "",
-        )
-        if distinct_rules:
-            print(
-                f"Fetching rule metadata for {len(distinct_rules)} rule(s)…",
-                file=sys.stderr,
-            )
-        for rk in sorted(distinct_rules):
-            why_md, how_md = fetch_rule_md(rk, organization, token)
-            rules[rk] = {"why": why_md, "how": how_md}
+    rules = _fetch_rule_metadata(issues, token, clean)
 
     markdown = render_markdown(
         source=source,
@@ -1708,6 +1761,50 @@ def _ensure_facets(api_url: str) -> str:
     return urllib.parse.urlunparse(parsed._replace(query=new_query))
 
 
+def _print_severity_section(sev: list) -> None:
+    """Print the Severities subsection of the triage summary."""
+    sev_sorted = sorted(
+        sev, key=lambda v: SEVERITY_ORDER.get(v.get("val", ""), 99)
+    )
+    print("Severities:")
+    for s in sev_sorted:
+        print(f"  {str(s.get('val', '')):<10} {s.get('count', 0)}")
+    print()
+
+
+def _print_type_section(typ: list) -> None:
+    """Print the Types subsection of the triage summary."""
+    print("Types:")
+    for t in sorted(typ, key=lambda v: -v.get("count", 0)):
+        print(f"  {str(t.get('val', '')):<15} {t.get('count', 0)}")
+    print()
+
+
+def _print_rules_section(rul: list) -> None:
+    """Print the Top rules subsection of the triage summary."""
+    top = sorted(rul, key=lambda v: (-v.get("count", 0), v.get("val", "")))[:15]
+    print("Top rules:")
+    for r in top:
+        print(f"  {r.get('val', '?'):<25} {r.get('count', 0)}×")
+    print()
+
+
+def _print_sample_section(sample_issues: list[dict]) -> None:
+    """Print the Sample (first 3) subsection of the triage summary."""
+    print("Sample (first 3):")
+    for i in sample_issues:
+        comp = i.get("component", "")
+        line = i.get("line")
+        print(
+            f"  [{i.get('severity', '?'):<8}] "
+            f"{i.get('rule', '?'):<25} "
+            f"{comp}:{line or 'unknown'}"
+        )
+        msg = i.get("message", "")
+        if msg:
+            print(f"           {msg[:120]}")
+
+
 def _print_summary_stdout(
     *,
     project: str,
@@ -1716,7 +1813,11 @@ def _print_summary_stdout(
     facets: dict,
     sample_issues: list[dict],
 ) -> None:
-    """Print a compact triage summary to stdout (no file written)."""
+    """Print a compact triage summary to stdout (no file written).
+
+    Each subsection (severities, types, rules, sample) is rendered by its
+    own helper to keep cognitive complexity under the S3776 threshold.
+    """
     print(f"# {project} ({scope}) — {total} issue(s)")
     print()
 
@@ -1725,40 +1826,13 @@ def _print_summary_stdout(
     rul = facets.get("rules", [])
 
     if sev:
-        sev_sorted = sorted(
-            sev, key=lambda v: SEVERITY_ORDER.get(v.get("val", ""), 99)
-        )
-        print("Severities:")
-        for s in sev_sorted:
-            print(f"  {str(s.get('val', '')):<10} {s.get('count', 0)}")
-        print()
-
+        _print_severity_section(sev)
     if typ:
-        print("Types:")
-        for t in sorted(typ, key=lambda v: -v.get("count", 0)):
-            print(f"  {str(t.get('val', '')):<15} {t.get('count', 0)}")
-        print()
-
+        _print_type_section(typ)
     if rul:
-        top = sorted(rul, key=lambda v: (-v.get("count", 0), v.get("val", "")))[:15]
-        print("Top rules:")
-        for r in top:
-            print(f"  {r.get('val', '?'):<25} {r.get('count', 0)}×")
-        print()
-
+        _print_rules_section(rul)
     if sample_issues:
-        print("Sample (first 3):")
-        for i in sample_issues:
-            comp = i.get("component", "")
-            line = i.get("line")
-            print(
-                f"  [{i.get('severity', '?'):<8}] "
-                f"{i.get('rule', '?'):<25} "
-                f"{comp}:{line or 'unknown'}"
-            )
-            msg = i.get("message", "")
-            if msg:
-                print(f"           {msg[:120]}")
+        _print_sample_section(sample_issues)
 
 
 # ---------------------------------------------------------------------------

@@ -155,6 +155,17 @@ The user's `~/.env` file (if they had one for 0.2.x) is left untouched — but `
 
 `render_markdown`, `parse_local_export`, and `discover_repo` were refactored to bring their mccabe complexity (C901, default threshold 10) under threshold. The pattern: extract one helper per section/discovery-source, keep the top-level function as a composition root. `render_markdown` dropped from CC 30 to ~3 by extracting 10 helpers (`_scope_display`, `_render_header`, `_render_focal_issue`, `_compute_facets`, `_render_summary_section`, `_render_why_section`, `_render_how_section`, `_render_instances_table`, `_render_per_rule_section`, `_render_per_rule_sections`). `parse_local_export` dropped by extracting `_parse_issue_from_json` + `_register_rule_metadata`. `discover_repo` dropped by extracting `_discover_from_package_json` + `_discover_from_pyproject` + `_discover_from_git_remote`. C901 was re-enabled in `pyproject.toml`'s `[tool.ruff.lint] select` after the refactor passed. C901 (mccabe) and SonarCloud's S3776 (cognitive, threshold 15) measure different things — both are intentionally enabled; a function that exceeds EITHER metric warrants a refactor. See `code-quality-SKILL.md` for the reduction techniques.
 
+A second pass further refactored `parse_local_export` (extracted `_process_category_dir`), `export_url` (extracted `_run_summary_mode`, `_fetch_issues_or_fail`, `_fetch_with_focal_fallback`, `_fetch_rule_metadata`), and `_print_summary_stdout` (extracted `_print_severity_section`, `_print_type_section`, `_print_rules_section`, `_print_sample_section`) to bring their S3776 cognitive complexity under 15 — the first pass had only targeted C901 mccabe, but S3776 counts nesting differently and the remaining bodies were still over.
+
+## SonarCloud shell:S8541 — `--no-build` + direct venv binaries
+
+SonarCloud's `shell:S8541` flags `uv run` and `uv sync` commands that omit `--no-build` (build-script execution risk from compromised source distributions). The fix in `deploy.sh`:
+
+- `uv sync --no-install-project --no-build --extra dev` — `--no-build` prevents building source distributions (only wheels); `--no-install-project` is required because the project itself is an editable source distribution that would need building. The tests use `import sie` via `conftest.py`'s `sys.path.insert`, not via the installed package — so the project doesn't need to be installed.
+- `.venv/bin/ruff` and `.venv/bin/pytest` directly — bypasses `uv run` entirely (S8541 only flags `uv run` / `pip install` / `uv pip install` pattern, not direct binary execution). The venv is already synced, so direct invocation is equivalent and faster (no uv overhead).
+
+`--no-build` alone doesn't work for editable installs (the project itself needs building). `--only-binary :all:` is a pip flag, not a uv flag. The `--no-install-project` + `--no-build` combination is the uv-native equivalent.
+
 ## Versioning
 
 Patch releases for `sie` (e.g. 1.0.0 → 1.0.1) are for bug fixes and small enhancements. Minor version bumps (1.0.x → 1.1.0) are for new features that change the CLI surface or output format. Major version bumps (1.x.y → 2.0.0) are reserved for breaking changes that require a fresh migration. The version is hardcoded at the top of `sie.py` as `VERSION = "1.0.0"` — update it in lockstep with the `pyproject.toml` `version` field and the `README.md` references.

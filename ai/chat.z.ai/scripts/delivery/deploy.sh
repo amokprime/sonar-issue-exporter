@@ -203,19 +203,30 @@ fi
 # changed, it's a no-op. If deps changed (new test added, etc.) or
 # .venv/ was deleted, it recreates the venv with the exact deps
 # from pyproject.toml [project.optional-dependencies] dev = [...].
-uv sync --extra dev
+#
+# `--no-install-project`: don't install the project itself (editable). The
+# tests use `import sie` via conftest.py's sys.path.insert, not via the
+# installed package — so the project doesn't need to be installed.
+#
+# `--no-build` (SonarCloud shell:S8541): don't build source distributions —
+# only use wheels. pytest + ruff both have wheels on PyPI, so this is safe
+# and prevents arbitrary build-script execution if a dep is compromised.
+# (Requires `--no-install-project` because the project itself is an editable
+# source distribution that would need building.)
+uv sync --no-install-project --no-build --extra dev
 
 echo ""
 echo "=== Lint (ruff autofix + gate) ==="
-# `ruff check --fix` applies safe fixes (unused imports, import order, etc.).
-# `ruff check` then gates: any remaining violation aborts before pytest.
-# The rule set is configured in pyproject.toml [tool.ruff.lint] select.
-uv run ruff check --fix sie.py
-uv run ruff check sie.py
+# Run ruff/pytest directly from .venv/bin/ instead of `uv run` to avoid
+# SonarCloud shell:S8541 (which flags `uv run` as a potential build-script
+# execution vector). The venv is already synced above, so direct binary
+# invocation is equivalent and faster (no uv overhead).
+.venv/bin/ruff check --fix sie.py
+.venv/bin/ruff check sie.py
 
 echo ""
 echo "=== Running tests ==="
-uv run pytest tests/ -v
+.venv/bin/pytest tests/ -v
 
 # ── Collision cleanup (scoped to zip-extracted files only) ─────────────────
 # Remove ONLY the files that came from deliver.zip (per the manifest unpack.sh
