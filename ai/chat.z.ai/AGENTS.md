@@ -11,8 +11,7 @@ These are the agent project instructions, tailored for the chat.z.ai web-channel
 ## Project structure
 
 - `/` — Project docs for humans (`README.md`, `LICENSE`). The README is the canonical user-facing doc; the `ai/chat.z.ai/` tree is for agents.
-- `sie.py` — The single-file Python 3.10+ script (v1.0.0+). Zero third-party dependencies. Replaces the 0.2.x `export_sonar_issue.py` + `watch_clipboard.py` split.
-- `sie-migrate.sh` — **Legacy.** Nondestructive migration script: uninstalls the old `uv tool` package, removes `~/.local/bin/sonar-export` and `~/.local/bin/sonar-watch` symlinks, installs `sie.py` as `~/.local/bin/sie`. Idempotent — safe to re-run. Superseded by `ai/chat.z.ai/scripts/delivery/deploy.sh` (which folds in all the migration logic plus the deploy + lint + test steps). Delete after adopting the `dsie` pipeline.
+- `sie.py` — The single-file Python 3.10+ script (v1.1.0+). Zero third-party dependencies. Replaces the 0.2.x `export_sonar_issue.py` + `watch_clipboard.py` split.
 - `tests/` — Pytest suite covering URL parsing, GitHub URL → SonarCloud mapping, fuzzy input resolution, local-folder migration, CLI disambiguation, Markdown rendering, and output path resolution. Run with `uv run pytest tests/ -v` from the repo root. Pure unit tests — no network. See `tests/README.md` for the full design notes.
 - `ai/chat.z.ai/` — This web chat workflow (the live copy).
   - `AGENTS.md` — This file.
@@ -23,13 +22,13 @@ These are the agent project instructions, tailored for the chat.z.ai web-channel
 
 ## Coding and testing
 
-- Don't put large comment blocks in code files. Pair each non-trivial `name.ext` source file with a `name.md` readme explaining intent, usage, and known limitations. `sie.py` ↔ `README.md`; `sie-migrate.sh` ↔ the migration section in `README.md`.
+- Don't put large comment blocks in code files. Pair each non-trivial `name.ext` source file with a `name.md` readme explaining intent, usage, and known limitations. `sie.py` ↔ `README.md`.
 - Documentation and context files should never be dense, minified walls of text. The `ai/chat.z.ai/` files are the exception — they're load-bearing for agent behavior — but they should still be skimmable.
 - Fence code snippets in markdown documentation. Short inline references like `sie.py` or `sie -s` are fine as inline backticks; longer code fragments, URLs with query params, and multi-line examples should be fenced.
 
 ## Running the test suite
 
-The pytest suite (`tests/`, ~112 specs) is lightweight — pure unit tests on parsing/resolution/rendering/output-path logic, no network. The sandbox can run it directly when a Repomix includes `sie.py` and `tests/**`:
+The pytest suite (`tests/`, ~182 specs) is lightweight — pure unit tests on parsing/resolution/rendering/output-path logic, no network. The sandbox can run it directly when a Repomix includes `sie.py` and `tests/**`:
 
 ```sh
 # pytest is in .venv/ (installed via `uv sync`), not system-wide.
@@ -63,7 +62,7 @@ The deploy pipeline (`dsie`) runs `ruff check --fix` + `ruff check` as a gate, s
   - PR staging: `https://sonarcloud.io/api/issues/search?componentKeys=amokprime_sonar-issue-exporter&pullRequest=N&issueStatuses=OPEN`
 - The agent can triage directly from the returned JSON — no need for the user to export and upload. See the `sonarqube-workflow` skill for the full sandbox API protocol (facets for first-pass counts, rule filtering, pagination, the auth-required endpoints to avoid).
 - **Auth boundary**: issue enumeration, facets, and rule filtering work unauthenticated. Rule metadata (`api/rules/show` — the `why`/`how` content) and single-issue lookup by key require auth — for rule rationale, the user runs `sie '<URL>'` locally with `SONAR_API_KEY` set and uploads the resulting Markdown.
-- Exported issue Markdown (when the user does run `sie` locally) is a single file at `scratch/sonar-issues.md` or `./sonar-issues.md` (depending on CWD context), not the per-issue folder tree of 0.2.x. See the `sonarqube-workflow` skill for the new layout.
+- Exported issue Markdown (when the user does run `sie` locally) is a single file at `scratch/issues.md` or `./issues.md` (depending on CWD context), not the per-issue folder tree of 0.2.x. See the `sonarqube-workflow` skill for the new layout.
 - **Gotcha**: closed issues have `line: null` in the API response (and appear as `Lunknown.json` in 0.2.x local exports) — check `status`/`resolution` before triaging, since closed issues can masquerade as fresh findings. The Markdown renderer marks these with `Lunknown` in the Line column.
 
 ## Delivery workflow
@@ -73,7 +72,7 @@ The `dsie` fish abbreviation (`abbr --add dsie '~/GitHub/sonar-issue-exporter/ai
 ### Pre-patch checklist
 
 1. Stop and request clarification when: a request is unclear, relevant files are missing from the Repomix, a request is technically infeasible, or a request violates a skill.
-2. Read only the sections you need — `sie.py` is ~2000 lines; grep for function names (`def parse_url_input`, `def render_markdown`, `def main`) and read just those ranges instead of the whole file.
+2. Read only the sections you need — `sie.py` is ~2800 lines; grep for function names (`def parse_url_input`, `def render_markdown`, `def main`) and read just those ranges instead of the whole file.
 3. Patch with minimal diff — change only what's needed and preserve surrounding code. Prefer targeted edits over full-section rewrites unless the section is being restructured.
 4. Consult `code-quality-SKILL.md` before modifying functions in `sie.py` (cognitive complexity threshold 15, redundant-exception-class gotcha, mutable defaults, KEEP_FIELDS ordering, URL-parsing param passthrough, GitHub branch-slash handling, CLI disambiguation).
 
@@ -101,4 +100,4 @@ The delivery scripts (`prepare.sh`, `deploy.sh`, `unpack.sh`) don't source `.bas
 
 ### Cleanup safety (deploy.sh)
 
-`deploy.sh`'s collision-cleanup at the end is scoped to only the files that came from `deliver.zip` — `unpack.sh` writes a `.deliver-files.list` manifest before extraction, and `deploy.sh` reads it to know which files to remove. Pre-existing files in `scratch/` (notes, prior session zips, anything the user stashed there) are preserved. A prior version used `find . -maxdepth 1 -type f` and swept every file in `scratch/`, deleting a user's `scratch.md` notes — see `archive/1.0.0/bug.md` for the post-mortem. If you ever modify the cleanup phase, preserve the manifest-based scoping.
+`deploy.sh`'s collision-cleanup at the end is scoped to only the files that came from `deliver.zip` — `unpack.sh` writes a `.deliver-files.list` manifest before extraction, and `deploy.sh` reads it to know which files to remove. Pre-existing files in `scratch/` (notes, prior session zips, anything the user stashed there) are preserved. A prior version used `find . -maxdepth 1 -type f` and swept every file in `scratch/`, deleting a user's `scratch.md` notes — see `archive/1.0.0/1.0.0.md` for the post-mortem. If you ever modify the cleanup phase, preserve the manifest-based scoping.

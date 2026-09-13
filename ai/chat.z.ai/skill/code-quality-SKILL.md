@@ -1,6 +1,6 @@
 ---
 name: code-quality
-description: Proactively avoid code quality issues and silent regressions in the sonar-issue-exporter Python script (sie.py) and the sie-migrate.sh shell script. Use this skill whenever writing or modifying Python in sie.py, especially when adding new input forms, changing URL parsing, modifying the Markdown renderer, or extending the test suite. Also use when writing or modifying sie-migrate.sh. Also use when the user mentions SonarQube, cognitive complexity, S3776, S5713, code smells, ruff, or when reviewing code for potential regressions. This skill prevents issues before they reach SonarCloud scans.
+description: Proactively avoid code quality issues and silent regressions in the sonar-issue-exporter Python script (sie.py) and the bash delivery scripts. Use this skill whenever writing or modifying Python in sie.py, especially when adding new input forms, changing URL parsing, modifying the Markdown renderer, or extending the test suite. Also use when writing or modifying the delivery scripts (deploy.sh, unpack.sh, prepare.sh). Also use when the user mentions SonarQube, cognitive complexity, S3776, S5713, code smells, ruff, or when reviewing code for potential regressions. This skill prevents issues before they reach SonarCloud scans.
 ---
 
 Documents the code quality patterns that SonarCloud has flagged in this project and the silent regressions that occurred during development. Following these rules proactively prevents issues rather than fixing them after SonarCloud flags them.
@@ -80,7 +80,7 @@ The `KEEP_FIELDS` tuple controls the displayed field order for issue JSON in the
 
 Don't reorder without reason. The order makes the per-issue JSON scannable: 9 one-liner values come first, then the multi-line arrays (`impacts`, `flows`) at the end where they don't push quick-scan info off screen.
 
-`key` is intentionally NOT in `KEEP_FIELDS` — it's added after the filter in local migration (real key from disk if present, else a `local:` synthetic key). For fresh API fetches, `key` is added by the renderer directly from the API response. This is documented in `MEMORY.md`.
+`key` is intentionally NOT in `KEEP_FIELDS` — it's added after the filter in local migration (real key from disk if present, else a `local:` synthetic key). For fresh API fetches, `key` is added by the renderer directly from the API response.
 
 ---
 
@@ -108,7 +108,7 @@ GitHub branch names can contain slashes (e.g. `feature/sync-rewrite`). The `/tre
 
 Local-path disambiguation
 
-`sie.main()` treats a single path-like positional as the OUTPUT path (with input defaulting to main of CWD's repo), NOT as a migration input. Local-folder migration requires `--migrate`. This was the v1.0.0 disambiguation refactor — see `MEMORY.md` for the rationale.
+`sie.main()` treats a single path-like positional as the OUTPUT path (with input defaulting to main of CWD's repo), NOT as a migration input. Local-folder migration requires `--migrate`. This was the v1.0.0 disambiguation refactor.
 
 `resolve_input()` explicitly raises `ValueError` on path-like inputs — this is intentional. The CLI layer catches path-like positionals BEFORE calling `resolve_input`. If you find yourself adding a path-like branch to `resolve_input`, stop — that's the bug the refactor removed. Use the CLI layer instead.
 
@@ -116,7 +116,7 @@ Local-path disambiguation
 
 Bash script patterns (delivery/deploy.sh, prepare.sh, unpack.sh, repomix.sh, zip.sh, .base.sh)
 
-The scripts in `ai/chat.z.ai/scripts/` are bash, and `sie-migrate.sh` (legacy) is a short POSIX shell script. The same patterns apply to all of them:
+The scripts in `ai/chat.z.ai/scripts/` are bash. The same patterns apply to all of them:
 
 - **Strict mode**: `set -euo pipefail` (the `-o pipefail` catches mid-pipe failures; the upload scripts don't pipe, but the delivery scripts do — `unzip -l | awk`, `find ... | while read`). Any failing command aborts before the destructive install step.
 - **Empty-variable guards**: every `rm` with a variable path uses `${var:?}` (ShellCheck SC2115). `deploy.sh`'s `rm_if_exists` and the cleanup loop both follow this; `unpack.sh`'s `cleanup()` trap too.
@@ -124,7 +124,8 @@ The scripts in `ai/chat.z.ai/scripts/` are bash, and `sie-migrate.sh` (legacy) i
 - **Diagnostics and exit codes**: error messages go to stderr (`echo "..." >&2`), and every `exit` carries an explicit status.
 - **Config over constants**: paths derive from `$HOME` + `SONAR_ISSUE_EXPORTER_ROOT` (or `LINEBYLINE_ROOT` in the LineByLine originals) + `XDG_BIN_HOME` (with `~/.local/bin` fallback), not hardcoded `/home/user/...`.
 - **Base/source pattern**: the upload scripts (`repomix.sh`, `zip.sh`) define a `snippet()` function and source `.base.sh`, which handles the shared setup (path resolution, scratch/upload dir, zip + clipboard). Mirrors LineByLine's `.base.sh` pattern. When adding a new upload workflow, define a new `snippet()` and source `.base.sh` — don't duplicate the setup logic. The delivery scripts (`prepare.sh`, `deploy.sh`, `unpack.sh`) don't source `.base.sh` — they have their own shared variables.
-- **Cleanup scoping**: `deploy.sh`'s collision-cleanup reads a `.deliver-files.list` manifest (written by `unpack.sh` before extraction) and removes only those files. Never use `find . -maxdepth 1 -type f` for the cleanup — it sweeps pre-existing files in `scratch/` (scratch.md notes, prior session zips). See `archive/1.0.0/bug.md` for the post-mortem on the two prior `find .` regressions.
+- **Cleanup scoping**: `deploy.sh`'s collision-cleanup reads a `.deliver-files.list` manifest (written by `unpack.sh` before extraction) and removes only those files. Never use `find . -maxdepth 1 -type f` for the cleanup — it sweeps pre-existing files in `scratch/` (scratch.md notes, prior session zips). See `archive/1.0.0/1.0.0.md` for the post-mortem on the two prior `find .` regressions.
+- **`--no-build` for S8541**: SonarCloud's `shell:S8541` flags `uv run` and `uv sync` commands that omit `--no-build` (build-script execution risk from compromised source distributions). The fix in `deploy.sh`: `uv sync --no-install-project --no-build --extra dev` (`--no-build` prevents building source distributions, `--no-install-project` is required because the project itself is an editable source distribution that would need building; tests use `import sie` via `conftest.py`'s `sys.path.insert`, not via the installed package). Then run `.venv/bin/ruff` and `.venv/bin/pytest` directly — bypasses `uv run` entirely (S8541 only flags `uv run` / `pip install`, not direct binary execution). `--no-build` alone doesn't work for editable installs; `--only-binary :all:` is a pip flag, not a uv flag.
 
 Run `bash -n` on each script after any change to catch syntax errors. ShellCheck if available: `shellcheck ai/chat.z.ai/scripts/delivery/deploy.sh`. (Note: `bash -n` is required, not `sh -n` — these scripts use bash arrays and `mapfile`, which dash doesn't support.)
 

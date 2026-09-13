@@ -4,7 +4,7 @@
 
 1. [SonarCloud URL](#1-sonarcloud-url-ui-or-api-form)
 2. [GitHub URL](#2-github-url-auto-converts-to-sonarcloud-api-url)
-3. [Fuzzy `owner/repo[/branch]`](#3-fuzzy-ownerrepobranch)
+3. [Fuzzy owner/repo/branch](#3-fuzzy-ownerrepobranch)
 4. [Single-token shortcuts](#4-single-token-shortcuts-from-inside-a-repo)
 5. [No arg](#5-no-arg-from-inside-a-repo)
 

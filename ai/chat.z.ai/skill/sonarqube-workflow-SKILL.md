@@ -45,33 +45,23 @@ When to skip Step 0 and go straight to Step 1: only when the user has already up
 
 Step 1: Read a `sie`-produced Markdown export (when the user uploads one)
 
-Layout (v1.1.0+ — when both SonarCloud and CodeQL have findings, the file uses the combined layout with `## SonarCloud Issues` and `## CodeQL Alerts` sections; when only one source has findings, the simpler single-source v1.0.0 layout is used with `# SonarQube Issues —` as the title):
+Layout (v1.1.0+): when both SonarCloud and CodeQL have open findings, the file uses a combined layout with a project-level header and one `## <Source>` section per source. When only one source has findings, the simpler single-source layout is used (no parent `## <Source>` heading, `# SonarQube Issues —` as the title, heading levels one shallower). The examples below show both.
+
+Combined layout (both sources):
 
 ```markdown
-# SonarQube Issues — <project> (<scope>)
+# Issues — <project> (<scope>)
 
 Generated: <timestamp>
 Source: `<input URL or local path>`
-Total: N issue(s) across M rule(s)
+Total: N issue(s) across M source(s), K rule(s)  (SonarCloud: X, CodeQL: Y)
 Token: present | absent
 
-> ⚠ **No token set** — why/how rule-rationale subsections render as placeholders.
-  (Only appears when no token was available.)
-
 ---
 
-## ★ Focal Issue                    # only when ?open=<KEY> was in the URL
-- **Key:** `<KEY>`
-- **Rule:** `<rule>`
-- **File:** `<component>:<line>`
-- **Severity:** ... · **Type:** ... · **Status:** ...
-- **Message:** ...
-→ [Open in SonarCloud](<deep link>)
-→ See rule section: [`<rule>`](#<anchor>)
+## SonarCloud Issues
 
----
-
-## Summary
+### Summary
 | Severity | Count |   | Type | Count |
 | ... |
 Top rules:
@@ -79,23 +69,82 @@ Top rules:
 
 ---
 
-## Rule: `<rule>` — <name>
-Severity: ... · Type: ... · CleanCode: ... · N instance(s)
+### Rule: `<rule>` — <name>
 
-### Why
+#### Why
 <rule rationale — fetched via api/rules/show when token present, else placeholder>
 
-### How to fix
+#### How to fix
 <fix guidance — fetched via api/rules/show when token present, else placeholder>
 
-### Instances
+#### Instances
 | File | Line | Message | Key | Status |
 | ... | Lunknown | ... | `local:...` | OPEN |  # Lunknown = closed-issue marker
 
 Deep links: `https://sonarcloud.io/project/issues?open=<KEY>&id=<PROJECT>`
+
+---
+
+## CodeQL Alerts
+
+### Summary
+| Severity | Count |   | Type | Count |
+| ... |
+
+### Rule: `<rule>` — <name>
+
+#### Why
+<CodeQL rule help — bundled in the alert JSON, no token needed>
+
+#### How to fix
+(SonarCloud's api/rules/show did not return separate fix guidance; see Why above.)
+
+#### Instances
+| File | Line | Message | Key | Status |
+| ... | ... | ... | `codeql:<N>` | OPEN |
+
+---
 ```
 
-Read the `### Why` and `### How to fix` sections once per rule. Scan the `### Instances` table for every finding — each row is a separate issue. Issues with `Lunknown` in the Line column are closed issues (the `line: null` gotcha from Step 0) — verify their `status` before triaging.
+Single-source layout (only one source has findings — no parent `## <Source>` heading, heading levels one shallower):
+
+```markdown
+# SonarQube Issues — <project> (<scope>)
+
+Generated: <timestamp>
+Source: `<input>`
+Total: N issue(s) across M rule(s)
+Token: present | absent
+
+---
+
+## ★ Focal Issue                    # only when ?open=<KEY> was in the URL
+- **Key:** `<KEY>`
+- **Rule:** `<rule>`
+- **File:** `<component>:<line>`
+
+---
+
+## Summary
+| Severity | Count |   | Type | Count |
+| ... |
+
+## Rule: `<rule>` — <name>
+
+### Why
+<rule rationale>
+
+### How to fix
+<fix guidance>
+
+### Instances
+| File | Line | Message | Key | Status |
+| ... | Lunknown | ... | `local:...` | OPEN |
+
+Deep links: `https://sonarcloud.io/project/issues?open=<KEY>&id=<PROJECT>`
+```
+
+Read the `#### Why` (or `### Why` in single-source layout) and `#### How to fix` sections once per rule. Scan the `#### Instances` table for every finding — each row is a separate issue. Issues with `Lunknown` in the Line column are closed issues (the `line: null` gotcha from Step 0) — verify their `status` before triaging.
 
 For 0.2.x local-folder exports (the legacy per-issue folder layout: `<category>/L{line}.json` + `why.md` + `how.md`), use `sie --migrate <folder>` to convert to the single-file Markdown format first.
 
@@ -114,7 +163,7 @@ Group findings before acting. Common rules in this project (the sonar-issue-expo
 | `python:S905` | Non-empty slice with `step` | Verify step direction matches start/stop | Medium — easy to get backwards |
 | `text:S8565` | Lock file missing | Add `uv.lock` (project uses `uv`) | Low |
 
-Shell rules (if `sie-migrate.sh` grows beyond its current size):
+Shell rules (for the delivery scripts in `ai/chat.z.ai/scripts/`):
 
 | Rule | Name | Typical fix |
 |---|---|---|
@@ -141,7 +190,7 @@ Group accepted fixes by file. Since `sie.py` is the only non-trivial source file
 Typical order:
 1. Simple substitutions first (exception class dedup, slice direction, lock file).
 2. Cognitive complexity reduction (S3776) — most invasive, do last.
-3. Shell-script rules (if `sie-migrate.sh` grows) — independent of Python code.
+3. Shell-script rules (for the delivery scripts) — independent of Python code.
 
 ---
 
