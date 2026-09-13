@@ -13,7 +13,7 @@ links:
 - `build` slice: `sie.py` + `tests/**` + `pyproject.toml` + `ai/chat.z.ai/` (AGENTS, MEMORY, skills) for code-change sessions
 - `skills` slice: `ai/chat.z.ai/skill/**` + `AGENTS.md` + `MEMORY.md` for meta-sessions on agent scaffolding
 ```
-Follow `*-SKILL.md` files as rules.
+Read `ai/chat.z.ai/AGENTS.md` and `ai/chat.z.ai/MEMORY.md` first, then all `ai/chat.z.ai/skill/*-SKILL.md` files. Follow AGENTS and skill files as rules. Read other files when I reference them or when they become relevant to a specific task. 
 ```
 
 ### zip.sh

@@ -69,7 +69,8 @@ class TestParseLocalExportClosedIssueMarker:
     ):
         """Files that don't match L<digits>.json or Lunknown.json must be
         ignored. Add a stray README.md to verify."""
-        stray = sample_local_export / "Refactor_this_function_to_reduce_its_Cognitive_Complexity" / "README.md"
+        cat = sample_local_export / "Refactor_this_function_to_reduce_its_Cognitive_Complexity"
+        stray = cat / "README.md"
         stray.write_text("# This should be ignored\n", encoding="utf-8")
         issues, _ = sie.parse_local_export(sample_local_export)
         # Still 2 issues, README.md didn't get parsed as an issue

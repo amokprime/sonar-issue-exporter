@@ -45,7 +45,7 @@ When to skip Step 0 and go straight to Step 1: only when the user has already up
 
 Step 1: Read a `sie`-produced Markdown export (when the user uploads one)
 
-Layout (v1.0.0+ single-file Markdown, replacing the 0.2.x per-issue folder tree):
+Layout (v1.1.0+ — when both SonarCloud and CodeQL have findings, the file uses the combined layout with `## SonarCloud Issues` and `## CodeQL Alerts` sections; when only one source has findings, the simpler single-source v1.0.0 layout is used with `# SonarQube Issues —` as the title):
 
 ```markdown
 # SonarQube Issues — <project> (<scope>)

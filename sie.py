@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""sie — sonar-issue-exporter (v1.0.0).
+"""sie — sonar-issue-exporter (v1.1.0).
 
 A self-contained Python 3.10+ script that fetches SonarCloud issues and
-renders them into a single Markdown file. Replaces the previous
-``sonar-export`` + ``sonar-watch`` two-tool split (0.2.x). See README.md
-for the full input-forms reference, disambiguation rules, and examples.
+GitHub code-scanning alerts (CodeQL etc.) and renders them into a single
+Markdown file. Replaces the previous ``sonar-export`` + ``sonar-watch``
+two-tool split (0.2.x). See README.md for the full input-forms reference,
+disambiguation rules, and examples.
 
 Usage:
     sie -h                 # short usage
@@ -26,12 +27,21 @@ repo discovery rules.
 
 Output path priority (non-migration): scratch/ if at git root, else cwd if
 in a git project, else ~/Downloads (last resort). Auto-incrementing:
-sonar-issues.md -> sonar-issues1.md -> sonar-issues2.md.
+issues.md -> issues1.md -> issues2.md.
+
+v1.1.0 behavior: ``sie``, ``sie staging``, and ``sie pr`` auto-discover
+open repo-wide GitHub code-scanning alerts (CodeQL etc.) alongside the
+branch-scoped SonarCloud issues. The two sources are rendered into a
+single ``issues.md`` with separate sections per source. SonarCloud
+issues that also appear as code-scanning alerts (pushed by the
+SonarCloud GitHub Action) are deduped — the SonarCloud version wins.
+If ``gh`` isn't available, the CodeQL capability is silently dropped.
 
 Auth: issue enumeration and facets work unauthenticated for public
-projects. Rule rationale (``api/rules/show``) requires a token from the
-``SONAR_API_KEY`` environment variable (or ``SONAR_TOKEN`` as fallback).
-No file-based config — keys must be in the shell environment.
+SonarCloud projects. Rule rationale (``api/rules/show``) requires a
+token from the ``SONAR_API_KEY`` environment variable (or ``SONAR_TOKEN``
+as fallback). CodeQL alerts require the GitHub CLI (``gh``) with
+``gh auth login`` (and the ``security_events`` scope).
 
 Exit codes: 0 on success, 1 on usage/write errors, 2 on API/transport
 errors.
@@ -57,11 +67,15 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 USER_AGENT = f"sie/{VERSION}"
 SONARCLOUD_BASE = "https://sonarcloud.io"
 GITHUB_BASE = "https://github.com"
-DEFAULT_OUTPUT_NAME = "sonar-issues.md"
+# v1.1.0: renamed from "sonar-issues.md" — the file may contain
+# SonarCloud issues, CodeQL alerts, or both (the new merged mode), so
+# the name is source-agnostic. The migration safety check in
+# _discover_migrate_folder also looks for this name.
+DEFAULT_OUTPUT_NAME = "issues.md"
 LAST_RESORT_OUTPUT_DIR = Path.home() / "Downloads"
 SCRATCH_DIR_NAME = "scratch"
 ISSUES_DIR_NAME = "issues"
@@ -453,11 +467,11 @@ def _strip_html(html: str) -> str:
     if not html:
         return ""
     # Decode common entities first (before tag stripping, so encoded
-    # &lt; inside <code> doesn't get re-stripped).
+    # < inside <code> doesn't get re-stripped).
     text = (
-        html.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
+        html.replace("<", "<")
+        .replace(">", ">")
+        .replace("&", "&")
         .replace("&nbsp;", " ")
         .replace("&quot;", '"')
         .replace("&#39;", "'")
@@ -529,6 +543,124 @@ def fetch_code_scanning_alert(
         raise RuntimeError(
             f"`gh api {api_path}` returned non-JSON output: {e}"
         ) from e
+
+
+def fetch_open_code_scanning_alerts(owner: str, repo: str) -> list[dict]:
+    """Fetch all open GitHub code-scanning alerts for a repo via ``gh api``.
+
+    Uses ``--paginate`` to follow Link headers, collecting every open
+    alert across all pages in one call. Returns ``[]`` silently if ``gh``
+    is not installed, not authenticated, or the API call fails for any
+    other reason (rate limit, network, repo not found, etc.).
+
+    The silent-drop behavior is intentional: the v1.1.0 auto-discovery
+    contract is "best-effort CodeQL alongside SonarCloud" — if the
+    CodeQL capability isn't available, the SonarCloud fetch still
+    completes and produces a SonarCloud-only report. Callers should
+    treat ``[]`` as "no CodeQL alerts" without distinguishing the cause.
+
+    Returns the list of alert JSON dicts (per the GitHub code-scanning
+    alerts API shape — each has ``number``, ``state``, ``rule``,
+    ``tool``, ``most_recent_instance``, etc.).
+    """
+    if not shutil.which("gh"):
+        return []
+    api_path = (
+        f"repos/{owner}/{repo}/code-scanning/alerts"
+        f"?state=open&per_page=100&sort=created&direction=desc"
+    )
+    try:
+        proc = subprocess.run(
+            ["gh", "api", "--paginate", api_path],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return []
+    if proc.returncode != 0:
+        return []
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return data
+
+
+def _is_sonar_pushed_alert(alert: dict) -> bool:
+    """Check if a code-scanning alert was pushed by SonarCloud.
+
+    SonarCloud's GitHub Action pushes its findings to the code-scanning
+    view via SARIF upload. The ``tool.name`` field in the alert reflects
+    the SARIF ``runs[].tool.driver.name`` — for SonarCloud pushes this
+    is ``"SonarCloud"`` (or ``"SonarQube"`` for self-hosted SonarQube
+    instances configured the same way). Native CodeQL alerts have
+    ``tool.name == "CodeQL"``.
+
+    These SonarCloud-pushed alerts are duplicates of what the SonarCloud
+    API already returns in the same ``sie`` run — drop them to avoid
+    showing the same finding twice. The matching is on the substring
+    ``"sonar"`` (case-insensitive) so it catches both "SonarCloud" and
+    "SonarQube" without listing each variant.
+    """
+    tool = alert.get("tool", {})
+    name = (tool.get("name") or "").lower()
+    return "sonar" in name
+
+
+def _code_scanning_alerts_to_issues(
+    alerts: list[dict],
+) -> tuple[list[dict], dict[str, dict]]:
+    """Convert a list of GitHub code-scanning alerts to sie issue dicts.
+
+    Returns ``(issues, rules)`` where ``issues`` is the list of converted
+    issue dicts (one per alert) and ``rules`` is the metadata dict keyed
+    by rule ID with ``{"why", "how"}`` values (the ``why`` is the alert's
+    ``rule.help`` markdown; ``how`` is empty — the GitHub API doesn't
+    separate fix guidance from explanation).
+
+    The first alert seen for a given rule wins the metadata slot — later
+    alerts for the same rule reuse the same metadata. This matches the
+    SonarCloud path's behavior (one rule section per rule, multiple
+    instances listed in its Instances table).
+    """
+    issues: list[dict] = []
+    rules: dict[str, dict] = {}
+    for alert in alerts:
+        issue = _code_scanning_alert_to_issue(alert)
+        issues.append(issue)
+        rule_key = issue["rule"]
+        if rule_key not in rules:
+            rules[rule_key] = _code_scanning_rule_to_meta(alert)
+    return issues, rules
+
+
+def _fetch_code_scanning_for_project(
+    project: str,
+) -> tuple[list[dict], dict[str, dict]]:
+    """Fetch repo-wide open CodeQL alerts for a project, deduped.
+
+    Splits the project key ``<owner>_<repo>`` back into owner/repo,
+    fetches all open code-scanning alerts via ``gh api``, and drops
+    SonarCloud-pushed alerts (they're already in the SonarCloud fetch).
+    Returns ``(issues, rules)`` — both empty if ``gh`` is unavailable
+    or the project key doesn't split into owner/repo.
+
+    This is the v1.1.0 auto-discovery entry point called by
+    ``export_url`` after the SonarCloud fetch completes. The silent-drop
+    semantics (no warnings, no errors) match the user spec: "If ``gh``
+    login isn't available, just drop this capability silently."
+    """
+    owner, sep, repo = project.partition("_")
+    if not sep or not owner or not repo:
+        return [], {}
+    alerts = fetch_open_code_scanning_alerts(owner, repo)
+    if not alerts:
+        return [], {}
+    native_alerts = [a for a in alerts if not _is_sonar_pushed_alert(a)]
+    if not native_alerts:
+        return [], {}
+    return _code_scanning_alerts_to_issues(native_alerts)
 
 
 def _code_scanning_alert_to_issue(alert: dict) -> dict:
@@ -1174,6 +1306,190 @@ def render_markdown(
     return "\n".join(out).rstrip() + "\n"
 
 
+def _demote_headings(md: str, levels: int = 1) -> str:
+    """Demote all Markdown ATX headings by ``levels`` (e.g. ``#`` → ``##``).
+
+    A line is treated as a heading if it starts with ``#``. Adds ``levels``
+    additional ``#`` characters to the start of each heading line. Used by
+    ``render_combined_markdown`` to nest a single-source render (which
+    uses ``#`` for the title, ``##`` for sections, ``###`` for
+    subsections) under a parent ``## SonarCloud Issues`` or
+    ``## CodeQL Alerts`` heading.
+
+    Non-heading lines (including indented code blocks that start with
+    spaces, and fenced code blocks whose ``#`` is inside the fence) are
+    passed through unchanged. The renderer's output doesn't currently
+    emit fenced code blocks, so the indented-only check is sufficient.
+    """
+    out_lines = []
+    for line in md.split("\n"):
+        if line.startswith("#"):
+            out_lines.append("#" * levels + line)
+        else:
+            out_lines.append(line)
+    return "\n".join(out_lines)
+
+
+def _strip_project_header(md: str) -> str:
+    """Strip the project-level header from a ``render_markdown`` output.
+
+    The header is everything from the start through the first ``---``
+    separator line (inclusive). What remains starts with the focal-issue
+    callout (if any) or the ``## Summary`` section.
+
+    Used by ``render_combined_markdown`` to extract just the body of a
+    single-source render so it can be demoted and nested under a parent
+    ``## <Source> Issues`` heading. The parent emits its own
+    project-level header once.
+    """
+    lines = md.split("\n")
+    for i, line in enumerate(lines):
+        if line.strip() == "---":
+            return "\n".join(lines[i + 1:]).lstrip("\n")
+    return md
+
+
+def _render_combined_header(
+    *, source: str, project: str, scope: str,
+    sonar_count: int, codeql_count: int,
+    distinct_rules: int, token_present: bool, clean: bool,
+) -> list[str]:
+    """Render the project-level header for a combined Sonar+CodeQL report.
+
+    Mirrors ``_render_header`` but the Total line shows source counts
+    (SonarCloud + CodeQL) instead of a single count. Emits ``Token:``
+    based on the SonarCloud token state — CodeQL alerts don't need a
+    SonarCloud token (their rule help is bundled in the alert JSON).
+    """
+    out: list[str] = []
+    title_project = project or "(unknown project)"
+    total = sonar_count + codeql_count
+    sources = (1 if sonar_count else 0) + (1 if codeql_count else 0)
+    out.append(f"# Issues — {title_project} ({_scope_display(scope)})")
+    out.append("")
+    out.append(f"Generated: {_now_iso()}")
+    out.append(f"Source: `{source}`")
+    out.append(
+        f"Total: {total} issue(s) across {sources} source(s), "
+        f"{distinct_rules} rule(s)"
+        f"  (SonarCloud: {sonar_count}, CodeQL: {codeql_count})"
+    )
+    if clean:
+        out.append("Token: clean (why/how sections suppressed)")
+    else:
+        out.append(f"Token: {'present' if token_present else 'absent'}")
+        if not token_present:
+            out.append("")
+            out.append(
+                "> ⚠ **No token set** — why/how rule-rationale subsections "
+                "render as placeholders for SonarCloud rules. Set "
+                "`SONAR_API_KEY` (or `SONAR_TOKEN`) in your environment to "
+                "fetch rule rationale via `api/rules/show`. CodeQL alert "
+                "rule help is bundled in the alert JSON and is always "
+                "rendered."
+            )
+    out.append("")
+    out.append("---")
+    out.append("")
+    return out
+
+
+def _render_combined_source_section(
+    *, title: str, source_render_kwargs: dict,
+) -> list[str]:
+    """Render one source's section (``## <title>`` + demoted body).
+
+    Calls ``render_markdown`` with the given kwargs, strips the
+    project-level header, demotes the remaining headings by one level,
+    and prepends the ``## <title>`` parent heading. Trailing ``---``
+    separators from the per-rule rendering are stripped so we don't get
+    two ``---`` lines in a row at the section boundary.
+    """
+    out: list[str] = [f"## {title}", ""]
+    body = render_markdown(**source_render_kwargs)
+    body = _strip_project_header(body)
+    body = _demote_headings(body, levels=1)
+    # Strip trailing --- separators (and surrounding blank lines) so we
+    # don't double up at the section boundary. The per-rule renderer
+    # ends each rule section with `---`, leaving one at the very end of
+    # the body — we replace it with our own section separator below.
+    body = body.rstrip()
+    while body.endswith("---"):
+        body = body[:-3].rstrip()
+    out.append(body)
+    out.append("")
+    out.append("---")
+    out.append("")
+    return out
+
+
+def render_combined_markdown(
+    *,
+    source: str,
+    project: str,
+    scope: str,
+    sonar_issues: list[dict],
+    sonar_facets: dict,
+    sonar_rules: dict[str, dict],
+    codeql_issues: list[dict],
+    codeql_rules: dict[str, dict],
+    token_present: bool,
+    focal_key: str | None,
+    clean: bool,
+) -> str:
+    """Render a combined SonarCloud + CodeQL Markdown report.
+
+    Used by ``export_url`` when both sources have issues. The output has
+    a project-level header (title, generated, source, total with source
+    counts, token), then a ``## SonarCloud Issues`` section (if
+    ``sonar_issues`` is non-empty) and a ``## CodeQL Alerts`` section
+    (if ``codeql_issues`` is non-empty). Each source's body is a demoted
+    ``render_markdown`` output (headings shifted down by one level so
+    they nest cleanly under the parent ``##`` heading).
+
+    The caller is responsible for the silent-drop semantics: only call
+    this when at least one source has issues. If both are empty, the
+    caller should skip writing the file (per the v1.1.0 spec). If only
+    one source has issues, the caller may use the simpler
+    ``render_markdown`` path instead — but using this combined renderer
+    with a single source also works (it just renders one section).
+    """
+    distinct_rules = (
+        {i.get("rule") for i in sonar_issues if i.get("rule")}
+        | {i.get("rule") for i in codeql_issues if i.get("rule")}
+    )
+    out: list[str] = []
+    out.extend(_render_combined_header(
+        source=source, project=project, scope=scope,
+        sonar_count=len(sonar_issues), codeql_count=len(codeql_issues),
+        distinct_rules=len(distinct_rules),
+        token_present=token_present, clean=clean,
+    ))
+    if sonar_issues:
+        out.extend(_render_combined_source_section(
+            title="SonarCloud Issues",
+            source_render_kwargs={
+                "source": source, "project": project, "scope": scope,
+                "issues": sonar_issues, "facets": sonar_facets,
+                "rules": sonar_rules, "token_present": token_present,
+                "focal_key": focal_key, "is_local_migration": False,
+                "clean": clean,
+            },
+        ))
+    if codeql_issues:
+        out.extend(_render_combined_source_section(
+            title="CodeQL Alerts",
+            source_render_kwargs={
+                "source": source, "project": project, "scope": "code-scanning",
+                "issues": codeql_issues, "facets": {},
+                "rules": codeql_rules, "token_present": True,
+                "focal_key": None, "is_local_migration": False,
+                "clean": clean,
+            },
+        ))
+    return "\n".join(out).rstrip() + "\n"
+
+
 # ---------------------------------------------------------------------------
 # Output path resolver + git-aware default dir discovery
 # ---------------------------------------------------------------------------
@@ -1240,8 +1556,8 @@ def resolve_output_path(
     """Resolve the output Markdown path.
 
     - If ``explicit`` is given: use it (creating parent dirs as needed).
-    - Else: ``base_dir / sonar-issues.md``, auto-incrementing if the file
-      already exists (``sonar-issues1.md``, ``sonar-issues2.md``, …).
+    - Else: ``base_dir / issues.md``, auto-incrementing if the file
+      already exists (``issues1.md``, ``issues2.md``, …).
     """
     if explicit:
         p = Path(explicit).expanduser()
@@ -1740,6 +2056,8 @@ def _run_summary_mode(
     """Cheap triage: fetch facets + first page, print summary to stdout, return exit code.
 
     Extracted from ``export_url`` to reduce cognitive complexity (S3776).
+    v1.1.0: also fetches repo-wide open CodeQL alert count (best-effort,
+    silent if gh unavailable) and prints it after the SonarCloud sections.
     """
     summary_url = _ensure_facets(api_url)
     print("Fetching facets + first page…", file=sys.stderr)
@@ -1754,9 +2072,14 @@ def _run_summary_mode(
         for f in data.get("facets", []) or []
     }
     issues = list(data.get("issues", []))
+    # v1.1.0: best-effort CodeQL count for the triage summary.
+    print("Fetching repo-wide open CodeQL alert count (best-effort)…", file=sys.stderr)
+    codeql_issues, _codeql_rules = _fetch_code_scanning_for_project(project)
+    codeql_count = len(codeql_issues)
     _print_summary_stdout(
         project=project, scope=scope, total=total,
         facets=facets, sample_issues=issues[:3],
+        codeql_count=codeql_count,
     )
     return 0
 
@@ -1872,6 +2195,64 @@ def _run_code_scanning_mode(
     return 0
 
 
+def _render_export_markdown(
+    *,
+    source: str,
+    project: str,
+    scope: str,
+    sonar_issues: list[dict],
+    sonar_facets: dict,
+    sonar_rules: dict[str, dict],
+    codeql_issues: list[dict],
+    codeql_rules: dict[str, dict],
+    token_present: bool,
+    focal_key: str | None,
+    clean: bool,
+) -> str | None:
+    """Pick the right renderer and return the Markdown, or ``None`` if empty.
+
+    Returns ``None`` when both ``sonar_issues`` and ``codeql_issues`` are
+    empty — the caller uses this to skip the write and print a "no
+    issues found" message instead (per the v1.1.0 spec).
+
+    Three render paths:
+      - Both sources non-empty → ``render_combined_markdown`` (project
+        header + ``## SonarCloud Issues`` + ``## CodeQL Alerts``)
+      - SonarCloud only → ``render_markdown`` (unchanged v1.0.0 layout)
+      - CodeQL only → ``render_markdown`` with ``scope="code-scanning"``
+
+    Extracted from ``export_url`` to keep cognitive complexity under
+    the S3776 threshold (15) — the three-way branch is its own natural
+    function.
+    """
+    has_sonar = bool(sonar_issues)
+    has_codeql = bool(codeql_issues)
+    if not has_sonar and not has_codeql:
+        return None
+    if has_sonar and has_codeql:
+        return render_combined_markdown(
+            source=source, project=project, scope=scope,
+            sonar_issues=sonar_issues, sonar_facets=sonar_facets,
+            sonar_rules=sonar_rules,
+            codeql_issues=codeql_issues, codeql_rules=codeql_rules,
+            token_present=token_present, focal_key=focal_key, clean=clean,
+        )
+    if has_sonar:
+        return render_markdown(
+            source=source, project=project, scope=scope,
+            issues=sonar_issues, facets=sonar_facets, rules=sonar_rules,
+            token_present=token_present, focal_key=focal_key,
+            is_local_migration=False, clean=clean,
+        )
+    # CodeQL-only path
+    return render_markdown(
+        source=source, project=project, scope="code-scanning",
+        issues=codeql_issues, facets={}, rules=codeql_rules,
+        token_present=True, focal_key=None,
+        is_local_migration=False, clean=clean,
+    )
+
+
 def export_url(
     descriptor: dict,
     *,
@@ -1888,8 +2269,17 @@ def export_url(
 
     If the descriptor carries a ``code_scanning_alert`` field (set when the
     input was a ``https://github.com/owner/repo/security/code-scanning/<N>``
-    URL), this routes to the GitHub code-scanning pipeline (``gh api``)
-    instead of the SonarCloud pipeline.
+    URL), this routes to the single-alert GitHub code-scanning pipeline
+    (``gh api``) instead of the SonarCloud pipeline. That's the v1.0.0
+    legacy path — the alert is fetched by number, no auto-discovery.
+
+    Otherwise (the v1.1.0 default), the pipeline fetches SonarCloud
+    issues for the resolved scope (branch/PR/main) AND repo-wide open
+    CodeQL alerts via ``_fetch_code_scanning_for_project``. The CodeQL
+    fetch is best-effort: if ``gh`` isn't available, the capability is
+    silently dropped and the SonarCloud-only path is used. If both
+    sources come back empty, no file is written (per the v1.1.0 spec);
+    a "no open issues found" message is printed to stderr.
 
     ``cwd`` is used to resolve the default output directory via
     ``_resolve_default_output_dir``. If ``None``, defaults to ``Path.cwd()``.
@@ -1898,8 +2288,8 @@ def export_url(
 
     The pipeline is assembled from helpers, each handling one phase
     (code-scanning mode, summary mode, issue fetch + focal fallback,
-    rule-metadata fetch, render + write). Extracted to keep cognitive
-    complexity under the S3776 threshold (15).
+    rule-metadata fetch, CodeQL auto-discovery, render + write).
+    Extracted to keep cognitive complexity under the S3776 threshold.
     """
     if "code_scanning_alert" in descriptor:
         return _run_code_scanning_mode(
@@ -1926,24 +2316,41 @@ def export_url(
     if summary_mode:
         return _run_summary_mode(api_url, project, scope, focal_key, token)
 
-    issues, facets, rc = _fetch_with_focal_fallback(api_url, project, focal_key, token)
+    sonar_issues, sonar_facets, rc = _fetch_with_focal_fallback(
+        api_url, project, focal_key, token,
+    )
     if rc is not None:
         return rc
 
-    rules = _fetch_rule_metadata(issues, token, clean)
+    sonar_rules = _fetch_rule_metadata(sonar_issues, token, clean)
 
-    markdown = render_markdown(
-        source=source,
-        project=project,
-        scope=scope,
-        issues=issues,
-        facets=facets,
-        rules=rules,
-        token_present=bool(token),
-        focal_key=focal_key,
-        is_local_migration=False,
-        clean=clean,
+    # v1.1.0: best-effort repo-wide CodeQL auto-discovery. Silent drop
+    # if gh isn't available — the SonarCloud-only path proceeds below.
+    print("Fetching repo-wide open CodeQL alerts (best-effort)…", file=sys.stderr)
+    codeql_issues, codeql_rules = _fetch_code_scanning_for_project(project)
+    if codeql_issues:
+        print(
+            f"  CodeQL: {len(codeql_issues)} alert(s) across "
+            f"{len(codeql_rules)} rule(s)",
+            file=sys.stderr,
+        )
+    else:
+        print("  CodeQL: 0 alerts (gh unavailable or no open alerts)", file=sys.stderr)
+
+    markdown = _render_export_markdown(
+        source=source, project=project, scope=scope,
+        sonar_issues=sonar_issues, sonar_facets=sonar_facets,
+        sonar_rules=sonar_rules,
+        codeql_issues=codeql_issues, codeql_rules=codeql_rules,
+        token_present=bool(token), focal_key=focal_key, clean=clean,
     )
+    if markdown is None:
+        print(
+            "\nNo open issues found "
+            f"(SonarCloud: {len(sonar_issues)}, CodeQL: {len(codeql_issues)}).",
+            file=sys.stderr,
+        )
+        return 0
 
     out_path = resolve_output_path(
         explicit=output_path,
@@ -2016,13 +2423,17 @@ def _print_summary_stdout(
     total: int,
     facets: dict,
     sample_issues: list[dict],
+    codeql_count: int = 0,
 ) -> None:
     """Print a compact triage summary to stdout (no file written).
 
     Each subsection (severities, types, rules, sample) is rendered by its
     own helper to keep cognitive complexity under the S3776 threshold.
+    v1.1.0: a final ``CodeQL Alerts:`` line prints the repo-wide open
+    count (0 if gh unavailable — silent drop, consistent with the
+    full-export path).
     """
-    print(f"# {project} ({scope}) — {total} issue(s)")
+    print(f"# {project} ({scope}) — {total} SonarCloud issue(s)")
     print()
 
     sev = facets.get("severities", [])
@@ -2037,6 +2448,12 @@ def _print_summary_stdout(
         _print_rules_section(rul)
     if sample_issues:
         _print_sample_section(sample_issues)
+
+    # CodeQL line always prints (even when 0) so the user knows the
+    # capability was attempted. The full-export path also always prints
+    # the CodeQL status line, so the summary matches.
+    print(f"CodeQL Alerts: {codeql_count} open (repo-wide, via gh api)")
+    print()
 
 
 # ---------------------------------------------------------------------------
@@ -2070,18 +2487,19 @@ def _discover_migrate_folder(cwd: Path) -> tuple[Path, Path]:
          export:
            - migrate: ``cwd/issues/``
            - output: ``cwd`` (alongside the issues/ subfolder)
-           - safety: refuse if cwd has ``.git/`` or ``cwd/sonar-issues.md``
+           - safety: refuse if cwd has ``.git/`` or ``cwd/issues.md``
              already exists
       2. cwd itself looks like an issues folder:
            - migrate: ``cwd``
            - output: ``cwd.parent`` (alongside the issues folder)
            - safety: refuse if cwd has ``.git/`` or
-             ``cwd.parent/sonar-issues.md`` already exists
+             ``cwd.parent/issues.md`` already exists
       3. Neither → error with helpful message
 
     The ``.git/`` refusal prevents auto-discovery from doing something
-    surprising at a git root. The ``sonar-issues.md`` refusal prevents
-    clobbering an existing migration output.
+    surprising at a git root. The ``issues.md`` refusal prevents
+    clobbering an existing migration output. (v1.1.0: was
+    ``sonar-issues.md``; renamed in lockstep with DEFAULT_OUTPUT_NAME.)
     """
     # Safety: refuse at git root (auto-discovery at a git root is too
     # risky — too many subfolders could match).

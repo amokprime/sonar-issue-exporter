@@ -82,7 +82,8 @@ The `dsie` fish abbreviation (`abbr --add dsie '~/GitHub/sonar-issue-exporter/ai
 1. **Syntax check** — `python3 -c "import py_compile; py_compile.compile('sie.py', doraise=True)"` or `uv run python -c "import sie"`. A syntax error in `sie.py` means the entire script is broken.
 2. **Lint** — `uv run ruff check --fix sie.py && uv run ruff check sie.py`. The deploy pipeline gates on this; pre-linting in-sandbox avoids the gate failing on the user's machine.
 3. **Tests** — `uv run pytest tests/ -v`. The test suite is the executable form of the code contracts in the skill files — if a test fails, the test name usually points to the function under test.
-4. **Trace one user action** — if the patch changed any logic (not just formatting), trace one user action through the changed code path to confirm it reaches the expected outcome.
+4. **Shebang check** — `head -1 sie.py` must print `#!/usr/bin/env python3` (not empty). Repomix extraction adds a leading empty line that breaks the shebang (the kernel only reads line 1). The tests don't catch this (they import `sie` as a module). Verify with `chmod +x sie.py && ./sie.py --version` — should print `sie <VERSION>`. See MEMORY.md "Repomix extraction: leading empty line breaks shebangs" for the v1.1.0 postmortem.
+5. **Trace one user action** — if the patch changed any logic (not just formatting), trace one user action through the changed code path to confirm it reaches the expected outcome.
 
 ### Post-turn updates
 

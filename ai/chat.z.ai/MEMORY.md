@@ -9,6 +9,24 @@ Harness-agnostic, git-tracked memory for AI coding agents. When a turn produces 
 - **`README.md` (exact name) doesn't show up in the chat download list.** A loose `README.md` placed in `download/` is invisible to the user — they see other loose files but not `README.md`. The fix: bundle it inside `deliver.zip` (the zip's internal filename doesn't trigger the filter). This is why the deliver workflow is preferred for any turn that ships a `README.md` change, even pure-docs updates — `prepare.sh` → `deliver.zip` → `dsie` gets around the bug.
 - **Files once introduced to `download/` persist in the user's view even after the agent removes them from the sandbox.** Removing a stale `deliver.zip` from `download/` doesn't make it disappear from the chat's file list — the IM gateway caches the listing. Don't try to "clean up" the user's view by `rm`-ing old files; just produce a fresh `deliver.zip` and the user will grab the latest one.
 
+## Repomix extraction: leading empty line breaks shebangs (v1.1.0 bug)
+
+The repomix XML format puts a newline between `<file path="...">` and the file content. When extracting with `re.compile(r'<file path="([^"]+)">(.*?)</file>', re.DOTALL)`, the captured content starts with `\n` — so every extracted file has an empty line 1. For most files this is harmless (Markdown, TOML, Python tests imported as modules). But for **executable scripts** (`sie.py`, shell scripts with shebangs), it's fatal: the kernel's shebang processing only reads line 1, so an empty line 1 means no interpreter is found, and the shell falls back to `/bin/sh` — which tries to parse the Python/shell file as shell commands and fails spectacularly.
+
+**v1.1.0 postmortem**: `sie.py` was deployed with an empty line 1 (inherited from the repomix extraction). `~/.local/bin/sie` became unexecutable — `sie --version` printed the module docstring as shell commands and hung. The deploy.sh `sie --version` check (under `set -e`) aborted the deploy before reaching `uv sync` + `ruff` + `pytest`, so the test suite never ran. The fix: strip the leading empty line from `sie.py` (and all shipped files) before staging to `download/`.
+
+**Pre-delivery check** (add to the post-patch verification): after writing/staging files, verify `head -1 sie.py` prints `#!/usr/bin/env python3` (not empty). For shell scripts, `head -1 deploy.sh` should print `#!/bin/bash`. The test suite (`pytest tests/`) does NOT catch this — tests import `sie` as a module, which doesn't invoke the shebang. Only `./sie.py --version` (executing the file directly) catches it. The sandbox can run this check: `chmod +x sie.py && ./sie.py --version` should print `sie <VERSION>`.
+
+**Extraction fix**: when re-extracting from repomix.xml, strip the leading `\n` from every file: `content = content[1:] if content.startswith("\n") else content`. Or use `content.lstrip("\n")` — but that strips multiple leading newlines, which might be intentional for some files (rare). The single-newline strip is safer.
+
+## Test environment-dependency: `~/Downloads` existence (v1.1.0 bug)
+
+`_resolve_default_output_dir(cwd)` has a last-resort branch: if `cwd` isn't in a git project, it returns `~/Downloads` if that directory exists, else falls back to `cwd`. This means tests that call `export_url(..., output_path=None, cwd=tmp_path)` and assert the file landed in `tmp_path` are **environment-dependent**: they pass on sandboxes where `~/Downloads` doesn't exist (falls back to `cwd=tmp_path`) but fail on user machines where `~/Downloads` exists (returns `~/Downloads`, file written there).
+
+**v1.1.0 postmortem**: `test_default_output_filename_is_issues_md` passed in the sandbox but failed on the user's machine (Fedora 44, `~/Downloads` exists). The test wrote a real `issues.md` to `~/Downloads` as a side effect. Fix: create `(tmp_path / ".git").mkdir()` at the start of the test so `_find_git_root(tmp_path)` returns `tmp_path`, making `_resolve_default_output_dir` deterministically return `tmp_path` (the "at git root without scratch" case).
+
+**Pattern for any test that calls `export_url` with `output_path=None`**: always create `(tmp_path / ".git").mkdir()` first, OR pass an explicit `output_path=str(tmp_path / "out.md")`. Don't rely on `_resolve_default_output_dir` falling back to `cwd` — that only happens when `~/Downloads` doesn't exist, which is environment-specific.
+
 ## SonarCloud project key
 
 The SonarCloud project key is `amokprime_sonar-issue-exporter` (not `sonar-issue-exporter`). Derived from the GitHub `owner/repo` as `<owner>_<repo>` — the SonarCloud convention for GitHub-integrated projects. `sie`'s fuzzy and GitHub-URL input forms auto-derive this; only custom project keys need an explicit SonarCloud URL.
@@ -176,8 +194,26 @@ CodeQL flagged `resolve_input` at two locations for substring checks on unparsed
 
 Requires `gh` + `gh auth login` (same as the `sie pr` shortcut). The alert is converted to the issue-dict shape (`_code_scanning_alert_to_issue`) and rendered with `render_markdown` (scope `"code-scanning"` → display "GitHub code-scanning"). Synthetic key is `codeql:<alert_number>` so it's visually distinct from SonarCloud issue keys.
 
-**Dedup vs SonarCloud**: no risk. CodeQL alerts (the `py/*`, `js/*` rules) don't appear in SonarCloud at all — they're a separate scanner. SonarCloud issues appear in SonarCloud's UI and in GitHub's code-scanning view (if the SonarCloud GitHub Action is configured), but a code-scanning URL fetches only the specific alert by number — it doesn't sweep the SonarCloud issue list. So passing a SonarCloud URL fetches SonarCloud issues; passing a code-scanning URL fetches one CodeQL alert. No overlap.
+This is the v1.0.0 single-alert URL form — it fetches ONE specific alert by number. The v1.1.0 auto-discovery (below) is the new default for `sie`/`sie staging`/`sie pr`.
+
+## v1.1.0: CodeQL auto-discovery + merged output
+
+`sie`, `sie staging`, and `sie pr` now fetch repo-wide open CodeQL alerts alongside the branch-scoped SonarCloud issues. The two sources are rendered into a single `issues.md` with `## SonarCloud Issues` and `## CodeQL Alerts` sections. If `gh` is unavailable, the CodeQL capability is silently dropped (SonarCloud-only path proceeds). If both sources are empty, no file is written.
+
+Key functions (all in `sie.py`):
+- `fetch_open_code_scanning_alerts(owner, repo)` — `gh api --paginate` for repo-wide open alerts. Returns `[]` silently on any failure (gh missing, auth error, network, non-JSON, non-list). The silent-drop is intentional — the CodeQL capability is best-effort.
+- `_is_sonar_pushed_alert(alert)` — identifies SonarCloud-pushed alerts by `tool.name` containing "sonar" (case-insensitive). These are dropped during dedup because the SonarCloud API already returns them. Native CodeQL alerts (`tool.name == "CodeQL"`) are kept.
+- `_code_scanning_alerts_to_issues(alerts)` — bulk convert alerts to sie issue dicts + rule metadata. First alert seen for a rule wins the metadata slot.
+- `_fetch_code_scanning_for_project(project)` — the auto-discovery entry point called by `export_url`. Splits `project` (`<owner>_<repo>`) back into owner/repo, fetches alerts, drops Sonar-pushed ones, returns `(issues, rules)`.
+- `render_combined_markdown(...)` — the merged Sonar+CodeQL renderer. Project-level header (with per-source counts in the Total line), then `## SonarCloud Issues` and/or `## CodeQL Alerts` sections. Each section is a demoted `render_markdown` body (headings shifted down by one level via `_demote_headings`).
+- `_render_export_markdown(...)` — three-way dispatch: both sources non-empty → `render_combined_markdown`; one source → `render_markdown`; both empty → return `None` (caller skips write).
+
+Output filename renamed: `DEFAULT_OUTPUT_NAME` is now `issues.md` (was `sonar-issues.md`). The migration safety check in `_discover_migrate_folder` also looks for `issues.md` now. Existing users with old `sonar-issues.md` files in their migration output dirs need to `rm` them once (or pass an explicit output path).
+
+Summary mode (`-s`/`--summary`) also includes a `CodeQL Alerts: N open` line at the end of stdout, so the triage summary reflects both sources.
+
+Dedup design choice: `tool.name` matching only (no tuple-based `(rule, path, line)` matching). The user picked "Both" in clarification but said "if you're confident one works and is strictly better, drop the other." `tool.name` is strictly better because: (a) it identifies the source scanner canonically (SonarCloud-pushed alerts have `tool.name = "SonarCloud"` or `"SonarQube"`), (b) it's O(n) instead of O(n*m), (c) it's robust to line-number drift between SonarCloud rescans, (d) it can't false-positive on native CodeQL alerts (different rule namespace). The tuple approach would only catch the edge case where SonarCloud's SARIF upload set `tool.name` to something other than "Sonar*" — that would be a SonarCloud integration misconfiguration, not a normal case.
 
 ## Versioning
 
-Patch releases for `sie` (e.g. 1.0.0 → 1.0.1) are for bug fixes and small enhancements. Minor version bumps (1.0.x → 1.1.0) are for new features that change the CLI surface or output format. Major version bumps (1.x.y → 2.0.0) are reserved for breaking changes that require a fresh migration. The version is hardcoded at the top of `sie.py` as `VERSION = "1.0.0"` — update it in lockstep with the `pyproject.toml` `version` field and the `README.md` references.
+Patch releases for `sie` (e.g. 1.0.0 → 1.0.1) are for bug fixes and small enhancements. Minor version bumps (1.0.x → 1.1.0) are for new features that change the CLI surface or output format. Major version bumps (1.x.y → 2.0.0) are reserved for breaking changes that require a fresh migration. The version is hardcoded at the top of `sie.py` as `VERSION = "1.1.0"` — update it in lockstep with the `pyproject.toml` `version` field and the `README.md` references.

@@ -30,6 +30,8 @@ When `sie.py`'s `main()` or any helper grows past ~15 cognitive complexity (S377
 
 The v1.0.0 refactor extracted these helpers from `render_markdown` (was CC 30 / mccabe 30) to bring it under both thresholds: `_scope_display`, `_render_header`, `_render_focal_issue`, `_compute_facets`, `_render_summary_section`, `_render_why_section`, `_render_how_section`, `_render_instances_table`, `_render_per_rule_section`, `_render_per_rule_sections`. Each helper renders one section of the report; `render_markdown` itself is now a ~10-line composition root. The same pattern was applied to `parse_local_export` (`_parse_issue_from_json`, `_register_rule_metadata`) and `discover_repo` (`_discover_from_package_json`, `_discover_from_pyproject`, `_discover_from_git_remote`). Follow this pattern when future growth pushes another function over threshold — extract, don't bloat.
 
+The v1.1.0 CodeQL auto-discovery feature followed the same pattern: `export_url` would have grown past CC 15 with the new CodeQL fetch + three-way render dispatch, so two helpers were extracted: `_fetch_code_scanning_for_project` (silent-drop repo-wide alert fetch + SonarCloud-push dedup) and `_render_export_markdown` (three-way dispatch: both / sonar-only / codeql-only / empty). The combined renderer `render_combined_markdown` itself is split into `_render_combined_header` (project-level header with per-source counts) and `_render_combined_source_section` (one `## <Source>` heading + demoted body), each well under threshold.
+
 ---
 
 Redundant exception class (S5713)

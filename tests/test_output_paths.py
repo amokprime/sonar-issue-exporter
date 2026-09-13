@@ -123,7 +123,9 @@ class TestDiscoverMigrateFolder:
 
     Safety refusals:
       - .git/ in CWD (auto-discovery at git root is too risky)
-      - sonar-issues.md already exists in the output dir (don't clobber)
+      - issues.md already exists in the output dir (don't clobber)
+        (v1.1.0: was sonar-issues.md; renamed in lockstep with
+        DEFAULT_OUTPUT_NAME.)
     """
 
     def _build_issues_folder(self, parent: Path) -> Path:
@@ -172,14 +174,14 @@ class TestDiscoverMigrateFolder:
             sie._discover_migrate_folder(tmp_path)
 
     def test_refuses_when_output_already_exists_case1(self, tmp_path: Path):
-        """If CWD/sonar-issues.md already exists (case 1), refuse to clobber."""
+        """If CWD/issues.md already exists (case 1), refuse to clobber."""
         self._build_issues_folder(tmp_path)
-        (tmp_path / "sonar-issues.md").write_text("existing", encoding="utf-8")
+        (tmp_path / "issues.md").write_text("existing", encoding="utf-8")
         with pytest.raises(RuntimeError, match="already exists"):
             sie._discover_migrate_folder(tmp_path)
 
     def test_refuses_when_output_already_exists_case2(self, tmp_path: Path):
-        """If parent/sonar-issues.md already exists (case 2), refuse to clobber."""
+        """If parent/issues.md already exists (case 2), refuse to clobber."""
         parent = tmp_path / "parent"
         parent.mkdir()
         cwd = parent / "issues"
@@ -187,7 +189,7 @@ class TestDiscoverMigrateFolder:
         cat = cwd / "Some_category"
         cat.mkdir()
         (cat / "L42.json").write_text("{}", encoding="utf-8")
-        (parent / "sonar-issues.md").write_text("existing", encoding="utf-8")
+        (parent / "issues.md").write_text("existing", encoding="utf-8")
         with pytest.raises(RuntimeError, match="already exists"):
             sie._discover_migrate_folder(cwd)
 

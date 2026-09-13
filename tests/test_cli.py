@@ -7,7 +7,7 @@ input. After the refactor:
 - `sie` (bare) → main of CWD → default output
 - `sie <path>` → main of CWD → <path> (output-path-only)
 - `sie <input> <path>` → input → <path>
-- `sie --migrate <path>` → migration → <input_parent>/sonar-issues.md
+- `sie --migrate <path>` → migration → <input_parent>/issues.md
 - `sie --migrate <path> <output>` → migration → <output>
 - `sie <path> <path>` (no --migrate) → ambiguous error
 - `sie --migrate` (no path) → "requires a path argument"
@@ -22,8 +22,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 import sie
 
@@ -198,7 +196,7 @@ class TestAmbiguousPositionals:
 
     def test_two_paths_error_message_mentions_migrate(self, tmp_path: Path, capsys):
         with patch("sie.Path.cwd", return_value=tmp_path):
-            rc = sie.main(["/tmp/foo", "/tmp/bar"])
+            sie.main(["/tmp/foo", "/tmp/bar"])
         captured = capsys.readouterr()
         assert "ambiguous" in captured.err.lower()
         # Error message should mention -m (the shortform) for --migrate

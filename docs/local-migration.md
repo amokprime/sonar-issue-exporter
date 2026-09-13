@@ -7,16 +7,16 @@ If you have an existing 0.2.x export folder (per-issue `L{line}.json` + `why.md`
 ```sh
 # Explicit path:
 sie -m '/path/to/linebyline/archive/semantic/0.35.18/issues'
-# -> writes sonar-issues.md alongside the issues/ folder (nondestructive)
+# -> writes issues.md alongside the issues/ folder (nondestructive)
 
 # Auto-discover (no path arg):
 cd ~/GitHub/linebyline/archive/semantic/0.37.2/
 sie -m
-# -> auto-discovers issues/ subfolder, writes sonar-issues.md in cwd
+# -> auto-discovers issues/ subfolder, writes issues.md in cwd
 
 cd ~/GitHub/linebyline/archive/semantic/0.37.2/issues/
 sie -m
-# -> cwd is the issues folder, writes sonar-issues.md in parent
+# -> cwd is the issues folder, writes issues.md in parent
 
 # Custom output path:
 sie -m '/path/to/issues' ~/my-report.md
@@ -29,7 +29,7 @@ The `-m` flag is required because a bare path-like positional (e.g. `sie ~/my-re
 `-m` without a path arg refuses to run in two cases:
 
 - **At a git root** — too many subfolders could match, so `sie` errors rather than guessing. Pass an explicit path.
-- **Existing `sonar-issues.md` in the output directory** — `sie` refuses to clobber. Pass an explicit output path, or remove the existing file first.
+- **Existing `issues.md` in the output directory** — `sie` refuses to clobber. Pass an explicit output path, or remove the existing file first. (v1.1.0: was `sonar-issues.md`; renamed in lockstep with `DEFAULT_OUTPUT_NAME`.)
 
 ### What the migration does
 
@@ -57,7 +57,7 @@ This happens when the 0.2.x export's `L{line}.json` files lack a `key` field (so
 | **Dependencies** | `requests`, `pyperclip`, optional `html2text` | Zero third-party deps (pure stdlib) |
 | **Clipboard watcher** | `sonar-watch` polls clipboard every 1s | Removed — use `sie '<URL>'` directly |
 | **Input forms** | Only `?open=<KEY>&id=<PROJECT>` (single-issue UI URL) | SonarCloud URL, GitHub URL, fuzzy `owner/repo[/branch]`, single-token shortcuts, no-arg |
-| **Output** | Per-issue folder tree (`L{line}.json` + `why.md` + `how.md`) | Single Markdown file (`sonar-issues.md`) |
+| **Output** | Per-issue folder tree (`L{line}.json` + `why.md` + `how.md`) | Single Markdown file (`issues.md`) |
 | **Quick triage** | Not supported | `--summary` flag (facets-only fetch) |
 | **Token env var** | `BEARER_TOKEN` | `SONAR_API_KEY` (preferred) or `SONAR_TOKEN` (fallback) |
 | **Local-folder migration** | Not supported | `sie -m [path]` (nondestructive) |

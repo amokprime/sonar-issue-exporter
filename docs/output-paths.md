@@ -4,14 +4,14 @@
 
 When no explicit output path is given, `sie` resolves the default output directory in this order:
 
-1. **`scratch/`** if cwd (current working directory) is a git-tracked project root and `scratch/` exists → `scratch/sonar-issues.md`
-2. **cwd** if cwd is a git root without `scratch/` → `./sonar-issues.md`
-3. **cwd** if inside a git project but not at root → `./sonar-issues.md` (e.g. from `archive/0.2.0/`)
-4. **`~/Downloads/`** (last resort) if not in a git project → `~/Downloads/sonar-issues.md`
+1. **`scratch/`** if cwd (current working directory) is a git-tracked project root and `scratch/` exists → `scratch/issues.md`
+2. **cwd** if cwd is a git root without `scratch/` → `./issues.md`
+3. **cwd** if inside a git project but not at root → `./issues.md` (e.g. from `archive/0.2.0/`)
+4. **`~/Downloads/`** (last resort) if not in a git project → `~/Downloads/issues.md`
 
-All modes auto-increment: `sonar-issues.md` → `sonar-issues1.md` → `sonar-issues2.md`.
+All modes auto-increment: `issues.md` → `issues1.md` → `issues2.md`. (v1.1.0: renamed from `sonar-issues.md` since the file may contain CodeQL alerts, SonarCloud issues, or both.)
 
-For `sie -m` (migration), the output defaults to alongside the issues folder (`<folder_parent>/sonar-issues.md`), not the git-aware path — the migration output belongs next to the input.
+For `sie -m` (migration), the output defaults to alongside the issues folder (`<folder_parent>/issues.md`), not the git-aware path — the migration output belongs next to the input.
 
 ---
 
@@ -21,11 +21,11 @@ For `sie -m` (migration), the output defaults to alongside the issues folder (`<
 
 | Invocation | Resolves to |
 |---|---|
-| `sie` | input=main of cwd → `scratch/sonar-issues.md` (or cwd, or `~/Downloads`) |
+| `sie` | input=main of cwd → `scratch/issues.md` (or cwd, or `~/Downloads`) |
 | `sie amokprime/linebyline` | input=fuzzy → default output path |
 | `sie amokprime/linebyline ~/r.md` | input=fuzzy → `~/r.md` |
 | `sie /tmp/out.md` | input=main of cwd → `/tmp/out.md` (path-like positional = output) |
-| `sie -m /path/to/issues` | migration → `<input_parent>/sonar-issues.md` |
+| `sie -m /path/to/issues` | migration → `<input_parent>/issues.md` |
 | `sie -m /path/to/issues ~/r.md` | migration → `~/r.md` |
 | `sie -m` | auto-discover `issues/` in cwd or cwd itself |
 | `sie /path /tmp/out.md` (no -m) | **ambiguous error** with hints to use `-m` |

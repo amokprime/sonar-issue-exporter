@@ -7,14 +7,17 @@ sonar-issues-exporter is not an official Sonar product. It is a client tool that
 
 ### About
 
-sonar-issue-exporter is a CLI tool to download Sonar issues. These issues can be generated automatically by SonarCloud GitHub Actions to quality control vibecoded projects (like this one).
+sonar-issue-exporter is a CLI tool to download Sonar issues and CodeQL code scanning alerts. These issues can be generated automatically by SonarCloud and CodeQL GitHub Actions to quality control vibecoded projects like this one.
 
 ## Setup
 
 ### SonarCloud GitHub Action
-1. Add a SonarCloud analysis GitHub workflow to your GitHub repo. Follow the instructions in the sonarcloud.yml template.
+1. Add a SonarCloud analysis GitHub workflow to your GitHub repo. Follow the instructions in the `sonarcloud.yml` template.
 2. Go to your repo Settings/Rules/Rulesets → Require code scanning results and add SonarCloud. It should now scan before any commit.
 3. For private projects, go to your SonarQube Cloud account → Security (shield icon) in left ribbon → Generate Tokens → Enter some name you'll remember → Copy the token and save it to a password manager like KeepassXC
+### CodeQL analysis
+1. In your GitHub repo settings -> Security and quality -> Advanced Security -> enable the default CodeQL analysis. You can also setup a GitHub Actions workflow with a `.yml` template.
+2. Install `gh` in a terminal and login to your GitHub account.
 
 ### Installation
 
@@ -29,7 +32,7 @@ If `~/.local/bin` isn't on `PATH` yet, add `export PATH="$HOME/.local/bin:$PATH"
 
 Then check:
 ```sh
-sie --version   # should print: sie 1.0.0
+sie --version   # should print: sie 1.1.0
 sie --help      # full usage + examples
 ```
 
@@ -71,7 +74,7 @@ sie --version           # confirm new version
 
 The most common commands for public projects (no `gh` auth needed):
 ```sh
-sie amokprime/sonar-issue-exporter                    # author/reponame fetch issues → sonar-issues.md
+sie amokprime/sonar-issue-exporter                    # author/reponame fetch issues → issues.md
 sie -s amokprime/sonar-issue-exporter                 # quick triage → stdout (no file)
 sie 'https://github.com/amokprime/linebyline/pull/11' # GitHub PR URL
 sie -c amokprime/linebyline                           # clean export (drops licensed Why/How)
@@ -98,75 +101,85 @@ sie -d                 # diagnose token env var visibility
 
 **Local-folder migration** (`-m` / `--migrate`): converts an existing 0.2.x per-issue folder export to the single-file Markdown format, nondestructively. See [docs/local-migration.md](docs/local-migration.md).
 
-**Output paths**: when no explicit output path is given, `sie` writes to `scratch/` (if at a git root), else cwd (if in a git project), else `~/Downloads/` (last resort). Auto-incrementing: `sonar-issues.md` → `sonar-issues1.md` → `sonar-issues2.md`. See [docs/output-paths.md](docs/output-paths.md) for the full resolution rules and positional disambiguation.
+**Output paths**: when no explicit output path is given, `sie` writes to `scratch/` (if at a git root), else cwd (if in a git project), else `~/Downloads/` (last resort). Auto-incrementing: `issues.md` → `issues1.md` → `issues2.md` (v1.1.0: renamed from `sonar-issues.md` since the file may contain CodeQL alerts, SonarCloud issues, or both). See [docs/output-paths.md](docs/output-paths.md) for the full resolution rules and positional disambiguation.
 
 ### Output format
 
-A single Markdown file with this structure:
-```markdown
-# SonarQube Issues — <project> (<scope>)
+A single Markdown file. When both SonarCloud and CodeQL have open findings, the file has a combined layout with a project-level header and one `## <Source>` section per source. When only one source has findings, the simpler single-source layout is used (no parent `## <Source>` heading).
 
-Generated: 2026-09-10 00:17 UTC
+```markdown
+# Issues — <project> (<scope>)
+
+Generated: 2026-09-12 23:48 UTC
 Source: `<input — the original URL, fuzzy string, or local path>`
-Total: 42 issue(s) across 8 rule(s)
+Total: 5 issue(s) across 2 source(s), 3 rule(s)  (SonarCloud: 4, CodeQL: 1)
 Token: present | absent
 
-> ⚠ **No token set** — why/how rule-rationale subsections render as placeholders.
-  (This block only appears when no token is available.)
-
 ---
 
-## ★ Focal Issue                    # only when ?open=<KEY> was in the URL
+## SonarCloud Issues
 
-- **Key:** `AaBprftR68fRE0gxBFjx`
-- **Rule:** `shelldre:S7682`
-- **File:** `ai/chat.z.ai/scripts/build.sh:2`
-- **Severity:** MAJOR · **Type:** CODE_SMELL · **Status:** OPEN
-- **Message:** Add an explicit return statement at the end of the function.
-
- [Open in SonarCloud](https://sonarcloud.io/project/issues?open=AaBprftR68fRE0gxBFjx&id=amokprime_linebyline)
- See rule section: [`shelldre:S7682`](#shelldre-s7682)
-
----
-
-## Summary
+### Summary
 
 | Severity   | Count |   | Type          | Count |
 |------------|-------|---|---------------|-------|
-| CRITICAL   | 4     |   | CODE_SMELL    | 42    |
-| MAJOR      | 31    |   |               |       |
-| MINOR      | 7     |   |               |       |
+| CRITICAL   | 4     |   | CODE_SMELL    | 4     |
 
 Top rules:
-- `javascript:S2681` — 15×
-- `javascript:S8786` — 10×
-- ...
+- `python:S3776` — 4×
 
 ---
 
-## Rule: `shelldre:S7682` — <rule name>
+### Rule: `python:S3776` — <rule name>
 
-Severity: MAJOR: 5 · Type: CODE_SMELL: 5 · CleanCode: LOGICAL: 5 · 5 instance(s)
+Severity: CRITICAL: 4 · Type: CODE_SMELL: 4 · 4 instance(s)
 
-### Why
+#### Why
 <rule rationale — fetched via api/rules/show when token present, else placeholder>
 
-### How to fix
+#### How to fix
 <fix guidance — fetched via api/rules/show when token present, else placeholder>
 
-### Instances
+#### Instances
 
 | File | Line | Message | Key | Status |
 |------|------|---------|-----|--------|
-| `ai/chat.z.ai/scripts/build.sh` | L2 | Add an explicit return statement... | `AaBprfwD68fRE0gxBFj3` | OPEN |
-| ... | ... | ... | ... | ... |
+| `sie.py` | L128 | Refactor this function... | `AaBprfwD68fRE0gxBFj3` | OPEN |
 
 Deep links: `https://sonarcloud.io/project/issues?open=<KEY>&id=<PROJECT>`
 
 ---
 
-## Rule: `javascript:S2681` — ...
-...
+## CodeQL Alerts
+
+### Summary
+
+| Severity   | Count |   | Type          | Count |
+|------------|-------|---|---------------|-------|
+| WARNING    | 1     |   | CODE_SMELL    | 1     |
+
+Top rules:
+- `py/incomplete-url-substring-sanitization` — 1×
+
+---
+
+### Rule: `py/incomplete-url-substring-sanitization` — <rule name>
+
+Severity: WARNING: 1 · Type: CODE_SMELL: 1 · 1 instance(s)
+
+#### Why
+<CodeQL rule help — bundled in the alert JSON, no token needed>
+
+#### How to fix
+(SonarCloud's `api/rules/show` did not return separate fix guidance; see Why above.)
+
+#### Instances
+
+| File | Line | Message | Key | Status |
+|------|------|---------|-----|--------|
+| `sie.py` | L1309 | Substring check on unparsed URL. | `codeql:5` | OPEN |
+
+---
 ```
 
 ### Troubleshooting

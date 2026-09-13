@@ -58,7 +58,9 @@ The `/security/code-scanning/<N>` form fetches a single GitHub code-scanning ale
 
 These alerts are repo-level (not branch-scoped), so the report scope shows "GitHub code-scanning" and the SonarCloud fetch is skipped entirely. The synthetic key is `codeql:<alert_number>` so it's visually distinct from SonarCloud issue keys.
 
-**No dedup risk vs SonarCloud**: CodeQL alerts (`py/*`, `js/*` rules) don't appear in SonarCloud at all — they're a separate scanner. SonarCloud issues can appear in GitHub's code-scanning view (if the SonarCloud GitHub Action is configured), but a code-scanning URL fetches only the specific alert by number — it doesn't sweep the SonarCloud issue list. So passing a SonarCloud URL fetches SonarCloud issues; passing a code-scanning URL fetches one CodeQL alert. No overlap.
+**v1.1.0 auto-discovery**: in addition to the single-alert URL form above, `sie`, `sie staging`, and `sie pr` now also fetch repo-wide open CodeQL alerts alongside the branch-scoped SonarCloud issues. The two sources are rendered into a single `issues.md` with `## SonarCloud Issues` and `## CodeQL Alerts` sections. SonarCloud-pushed alerts (those with `tool.name` containing "sonar") are dropped during dedup — the SonarCloud API already returns them. If `gh` isn't available, the CodeQL capability is silently dropped.
+
+**No dedup risk vs SonarCloud for native CodeQL**: native CodeQL alerts (`py/*`, `js/*` rules) don't appear in SonarCloud at all — they're a separate scanner. SonarCloud issues can appear in GitHub's code-scanning view (if the SonarCloud GitHub Action is configured), and those SonarCloud-pushed alerts are dropped by the dedup.
 
 GitHub branch names can contain slashes (e.g. `feature/sync-rewrite`). The `/tree/<branch>` URL form preserves the full branch name across the slash; the `/blob/<branch>/<path>` form has only one segment after `/blob/` as the branch (the rest is the file path).
 
