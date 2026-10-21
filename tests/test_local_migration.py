@@ -1,7 +1,7 @@
 """Tests for sie.parse_local_export — 0.2.x folder → issues + rules.
 
 Uses the `sample_local_export` fixture from conftest.py, which mirrors
-the layout documented in sonarqube-workflow-SKILL.md and the actual
+the layout documented in skills/sonarqube-workflow/SKILL.md and the actual
 archive/0.1.2/issues/ shape.
 """
 

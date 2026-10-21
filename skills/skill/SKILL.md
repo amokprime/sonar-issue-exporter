@@ -2,11 +2,9 @@
 name: skill
 description: Create new skills and update existing ones for the sonar-issue-exporter project. Use this skill whenever you need to create a skill from scratch, revise an existing skill, extract knowledge from MEMORY.md into a skill, or decide whether something belongs in a skill versus MEMORY.md. Also use when planning a skill-creation or skill-update session, or when evaluating whether existing skills need updating based on recent code changes.
 ---
-
 A skill bakes substantive, reusable knowledge into a persistent artifact so it doesn't bloat MEMORY.md or get lost between sessions. Covers when to create or update skills, how to write them, and how to keep them current.
 
 ---
-
 When to create a skill
 
 1. Accumulated patterns — the same class of problem recurs across versions (SonarCloud remediation, URL-parsing edge cases, Markdown-rendering contracts). If you've written the same explanation three times in MEMORY.md, it belongs in a skill.
@@ -17,7 +15,6 @@ When to create a skill
 When not to create a skill: one-off bug fixes (stay in MEMORY.md), app-specific state that doesn't generalize, information already well-covered by an existing skill (update that skill instead).
 
 ---
-
 MEMORY.md vs skills
 
 MEMORY.md holds: project-specific bugs and their root causes, architectural decisions unique to this project, one-off pitfalls (e.g. "SonarCloud project key is `amokprime_sonar-issue-exporter`, not `sonar-issue-exporter`"), version-by-version change log, known limitations.
@@ -31,10 +28,9 @@ When extracting from MEMORY.md into a skill, prune the MEMORY.md entry to a brie
 Within a single version's MEMORY.md section, write one bullet per parallel thread of work, not one bullet per turn. If a thread evolves across multiple turns (fix → regression catch → follow-up), update the existing bullet in-place to reflect the final state rather than appending a new bullet per turn.
 
 ---
-
 Anatomy of a skill
 
-File: `topic-SKILL.md` stored in `ai/chat.z.ai/skill/`. Frontmatter `name` matches the file prefix without `-SKILL` (e.g. `name: sonarqube-workflow`). Keep a chat log of skill creation/update sessions in `ai/chat.z.ai/skills/chat/` (not yet present — add when the first session log is needed).
+File: `SKILL.md` stored in `skills/<name>/`. Frontmatter `name` matches the file prefix without `-SKILL` (e.g. `name: sonarqube-workflow`). Keep a chat log of skill creation/update sessions in `archive/<version>/` (per-version folders hold all session types).
 
 Frontmatter `description` is the primary triggering mechanism — it determines whether the model consults this skill. Write it to be pushy: include both what the skill does and specific contexts for when to use it. List synonyms, related terms, and adjacent scenarios to combat undertriggering.
 
@@ -51,7 +47,6 @@ Body structure — organize in the order the model will need it during a typical
 Keep the body under 500 lines. If approaching this limit, split the domain into sub-skills.
 
 ---
-
 Writing style
 
 Explain the why. Don't rely on MUST and NEVER — explain the reasoning so the model understands why something matters and can adapt to situations the skill doesn't explicitly cover.
@@ -73,7 +68,6 @@ Include concrete examples sparingly — one per non-obvious pattern. Skip exampl
 Prefer plain structure over decorative formatting. Tables only where they serve as genuine lookup references (e.g. a rule catalog). Bold only for the single most important term in a paragraph.
 
 ---
-
 Creating a new skill
 
 1. Identify the domain — look at MEMORY.md entries that share a common theme. If multiple entries about the same domain are verbose and would benefit from a shared reference, that domain needs a skill.
@@ -81,10 +75,9 @@ Creating a new skill
 3. Extract from MEMORY.md — for each related entry: if it describes a general pattern, extract the pattern into the skill and prune MEMORY.md to a brief reference; if it describes an app-specific event, keep it in MEMORY.md as-is; if it straddles both, extract the general principle into the skill and keep the specific instance in MEMORY.md.
 4. Write the skill — follow the anatomy and writing style above. Draft it, then read it with fresh eyes and improve. Would a fresh model in a new session be able to follow this without additional context?
 5. Cross-reference with existing skills — check that the new skill doesn't duplicate or contradict existing ones.
-6. Add a test if the skill documents a code contract — e.g. the `code-quality-SKILL.md` "URL parsing — preserve extra params" section has a corresponding test in `tests/test_url_parsing.py`. The test is the executable form of the skill's contract.
+6. Add a test if the skill documents a code contract — e.g. `skills/code-quality/SKILL.md` "URL parsing — preserve extra params" section has a corresponding test in `tests/test_url_parsing.py`. The test is the executable form of the skill's contract.
 
 ---
-
 Updating an existing skill
 
 Update a skill when a patch changes the architecture the skill documents. Don't update for a pure bug fix that doesn't change the documented architecture.
@@ -96,7 +89,6 @@ Stale reference hygiene — skills that reference specific line numbers go stale
 Add to skill: patterns that recurred or would recur, cautions that prevent real bugs, reference data the model looks up, workflow steps the model must follow. Don't add: app-specific state, one-off fixes that don't generalize, implementation details that change frequently, anything already well-covered by another skill.
 
 ---
-
 Evaluating skill quality
 
 1. Triggering accuracy — would the description cause the skill to be consulted when it should be? Would it trigger when it shouldn't?
@@ -107,11 +99,10 @@ Evaluating skill quality
 6. Test alignment — if the skill documents a code contract, is there a test that enforces it? If not, add one (the test is more durable than the prose).
 
 ---
-
 Lessons from practice
 
-Knowledge offload reduces MEMORY.md bloat. Extracting SonarCloud remediation knowledge from MEMORY.md into `sonarqube-workflow-SKILL.md` turns verbose per-version SonarCloud details into one-line references. MEMORY.md is then a compact historical overview for regression investigation, not a how-to guide.
+Knowledge offload reduces MEMORY.md bloat. Extracting SonarCloud remediation knowledge from MEMORY.md into `skills/sonarqube-workflow/SKILL.md` turns verbose per-version SonarCloud details into one-line references. MEMORY.md is then a compact historical overview for regression investigation, not a how-to guide.
 
-Tests are the executable form of skill contracts. The `code-quality-SKILL.md` "URL parsing — preserve extra params" section is enforced by `tests/test_url_parsing.py::TestUiUrlParsing::test_ui_url_preserves_extra_params`. When the test fails, the skill explains why the contract matters. When the skill is updated, the test is updated in lockstep.
+Tests are the executable form of skill contracts. `skills/code-quality/SKILL.md` "URL parsing — preserve extra params" section is enforced by `tests/test_url_parsing.py::TestUiUrlParsing::test_ui_url_preserves_extra_params`. When the test fails, the skill explains why the contract matters. When the skill is updated, the test is updated in lockstep.
 
-General patterns emerge from specific incidents. The `code-quality-SKILL.md` "GitHub URL — branch names with slashes" section was extracted from a real bug caught by `tests/test_github_url.py::test_branch_with_slashes_in_name` during the v1.0.0 refactor. No one-off note justified its own section, but the general principle — "branch names can contain slashes; `/tree/` joins everything after, `/blob/` takes only the first segment" — applies to any future GitHub URL handling.
+General patterns emerge from specific incidents. `skills/code-quality/SKILL.md` "GitHub URL — branch names with slashes" section was extracted from a real bug caught by `tests/test_github_url.py::test_branch_with_slashes_in_name` during the v1.0.0 refactor. No one-off note justified its own section, but the general principle — "branch names can contain slashes; `/tree/` joins everything after, `/blob/` takes only the first segment" — applies to any future GitHub URL handling.

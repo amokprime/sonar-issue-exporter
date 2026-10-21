@@ -27,7 +27,7 @@ import sie  # noqa: E402  — path manipulation must come first
 def sample_local_export(tmp_path: Path) -> Path:
     """Build a minimal 0.2.x local-export folder under tmp_path.
 
-    Mirrors the layout documented in sonarqube-workflow-SKILL.md and
+    Mirrors the layout documented in skills/sonarqube-workflow/SKILL.md and
     archive/0.1.2/issues/:
 
         <root>/

@@ -2,22 +2,20 @@
 
 Harness-agnostic, git-tracked memory for AI coding agents. When a turn produces a durable fact (gotcha, invariant, project-specific constraint that training data wouldn't predict), update this file. The web-channel agent edits its sandbox copy and produces it in `download/` for the user to apply to the repo.
 
-**Discipline**: keep this lean. One-off gotchas that could harm the project now or in the very near future belong here. Historical lessons that don't survive the most recent refactor should be compacted to a one-line reference (or pruned if totally harmless). If a class of knowledge recurs across versions, promote it to a skill in `ai/chat.z.ai/skill/` and leave a one-line pointer here.
+**Discipline**: keep this lean. One-off gotchas that could harm the project now or in the very near future belong here. Historical lessons that don't survive the most recent refactor should be compacted to a one-line reference (or pruned if totally harmless). If a class of knowledge recurs across versions, promote it to a skill in `skills/` and leave a one-line pointer here.
 
 ## IM gateway: README name + persistence bugs
 
-- **`README.md` (exact name) doesn't show up in the chat download list.** A loose `README.md` placed in `download/` is invisible to the user — they see other loose files but not `README.md`. The fix: bundle it inside `deliver.zip` (the zip's internal filename doesn't trigger the filter). This is why the deliver workflow is preferred for any turn that ships a `README.md` change, even pure-docs updates — `prepare.sh` → `deliver.zip` → `dsie` gets around the bug.
+- **`README.md` (exact name) doesn't show up in the chat download list.** A loose `README.md` placed in `download/` is invisible to the user — they see other loose files but not `README.md`.
+    - The fix: bundle it inside `deliver.zip` (the zip's internal filename doesn't trigger the filter).
+    - This is why the deliver workflow is preferred for any turn that ships a `README.md` change, even pure-docs updates — `prepare.sh` → `deliver.zip` → `scripts/unpack.sh` gets around the bug.
 - **Files once introduced to `download/` persist in the user's view even after the agent removes them from the sandbox.** Removing a stale `deliver.zip` from `download/` doesn't make it disappear from the chat's file list — the IM gateway caches the listing. Don't try to "clean up" the user's view by `rm`-ing old files; just produce a fresh `deliver.zip` and the user will grab the latest one.
 
-## Repomix extraction: leading empty line breaks shebangs (v1.1.0 bug)
+## Leading empty line breaks shebangs
 
-The repomix XML format puts a newline between `<file path="...">` and the file content. When extracting with `re.compile(r'<file path="([^"]+)">(.*?)</file>', re.DOTALL)`, the captured content starts with `\n` — so every extracted file has an empty line 1. For most files this is harmless (Markdown, TOML, Python tests imported as modules). But for **executable scripts** (`sie.py`, shell scripts with shebangs), it's fatal: the kernel's shebang processing only reads line 1, so an empty line 1 means no interpreter is found, and the shell falls back to `/bin/sh` — which tries to parse the Python/shell file as shell commands and fails spectacularly.
+When a file has an empty line 1 before the shebang, the kernel's shebang processing fails — it only reads line 1, so an empty line means no interpreter is found. The shell falls back to `/bin/sh`, which tries to parse the Python or shell file as shell commands and fails.
 
-**v1.1.0 postmortem**: `sie.py` was deployed with an empty line 1 (inherited from the repomix extraction). `~/.local/bin/sie` became unexecutable — `sie --version` printed the module docstring as shell commands and hung. The deploy.sh `sie --version` check (under `set -e`) aborted the deploy before reaching `uv sync` + `ruff` + `pytest`, so the test suite never ran. The fix: strip the leading empty line from `sie.py` (and all shipped files) before staging to `download/`.
-
-**Pre-delivery check**: after staging files, verify `head -1 sie.py` prints `#!/usr/bin/env python3` (not empty). The test suite does NOT catch this — tests import `sie` as a module. Only `chmod +x sie.py && ./sie.py --version` catches it. This check is step 4 of the AGENTS.md post-patch verification checklist.
-
-**Extraction fix**: when re-extracting from repomix.xml, strip the leading `\n` from every file: `content = content[1:] if content.startswith("\n") else content`.
+**Pre-delivery check**: after staging files, verify `head -1 sie.py` prints `#!/usr/bin/env python3` (not empty). The test suite does NOT catch this — tests import `sie` as a module. Only `chmod +x sie.py && ./sie.py --version` catches it.
 
 ## Test environment-dependency: `~/Downloads` existence (v1.1.0 bug)
 
@@ -31,7 +29,7 @@ The SonarCloud project key is `amokprime_sonar-issue-exporter` (not `sonar-issue
 
 ## Auth boundary
 
-See `sonarqube-workflow-SKILL.md` Step 0 for the canonical auth boundary table (what works unauthenticated vs. what requires `SONAR_API_KEY`). The key points: issue enumeration/facets/pagination work unauthenticated; `api/rules/show` (why/how content) and single-issue `?issues=<KEY>` lookup require auth.
+See `skills/sonarqube-workflow/SKILL.md` Step 0 for the canonical auth boundary table (what works unauthenticated vs. what requires `SONAR_API_KEY`). The key points: issue enumeration/facets/pagination work unauthenticated; `api/rules/show` (why/how content) and single-issue `?issues=<KEY>` lookup require auth.
 
 ## API key: env var only (no .env)
 
@@ -51,25 +49,25 @@ The `sie pr` single-token shortcut invokes `gh pr list --state open --limit 1` t
 
 ## Local-path disambiguation + `-m` auto-discovery
 
-See `code-quality-SKILL.md` "Local-path disambiguation" section for the canonical contract: a single path-like positional is the OUTPUT path (input defaults to main of CWD's repo), NOT a migration input. Migration requires `-m`.
+See `skills/code-quality/SKILL.md` "Local-path disambiguation" section for the canonical contract: a single path-like positional is the OUTPUT path (input defaults to main of CWD's repo), NOT a migration input. Migration requires `-m`.
 
 `-m` auto-discovery: if CWD contains an `issues/` subfolder that looks like a 0.2.x export → migrate that; if CWD itself looks like an issues folder → migrate CWD. Safety refusals: `.git/` in CWD, or existing `issues.md` in the output directory.
 
 ## Closed-issue gotcha
 
-See `sonarqube-workflow-SKILL.md` Step 0 for the canonical description. Closed issues have `line: null` in the API response and render with `Lunknown` in the Line column. Check `status` before triaging — a closed/FIXED issue in a fresh export is stale, not a regression.
+See `skills/sonarqube-workflow/SKILL.md` Step 0 for the canonical description. Closed issues have `line: null` in the API response and render with `Lunknown` in the Line column. Check `status` before triaging — a closed/FIXED issue in a fresh export is stale, not a regression.
 
 ## Field ordering (KEEP_FIELDS)
 
-See `code-quality-SKILL.md` "Field ordering (KEEP_FIELDS)" section for the canonical contract. The order is `rule, component, line, textRange, message, severity, type, cleanCodeAttribute, cleanCodeAttributeCategory, impacts, flows` (identity → location → description → classification → evidence). Don't reorder without reason.
+See `skills/code-quality/SKILL.md` "Field ordering (KEEP_FIELDS)" section for the canonical contract. The order is `rule, component, line, textRange, message, severity, type, cleanCodeAttribute, cleanCodeAttributeCategory, impacts, flows` (identity → location → description → classification → evidence). Don't reorder without reason.
 
 ## CLI flags + clean mode
 
 Every longform flag has a shortform: `-h/--help`, `-s/--summary`, `-m/--migrate`, `-d/--debug-env`, `-c/--clean`, `-v/--version`. See `README.md` and `docs/clean-mode.md` for details. Clean mode (`-c`) silently drops Why/How sections to avoid pushing licensed Sonar content.
 
-## Deployment pipeline (replaces sie-migrate.sh)
+## Deployment pipeline
 
-The `dsie` fish abbreviation runs `ai/chat.z.ai/scripts/delivery/unpack.sh` which extracts `deliver.zip` to `scratch/`, runs `deploy.sh` (deploys files, installs `sie.py` to `~/.local/bin/sie`, cleans 0.2.x artifacts, runs `uv sync` + ruff gate + pytest), then cleans up. See `scripts/README.md` for the per-script reference.
+`scripts/unpack.sh` (double-click in a file manager or run from a terminal) which extracts `deliver.zip` to `scratch/`, runs `skills/delivery/scripts/deploy.sh` (deploys files via directory-walking `__` path reversal, installs `sie.py` to `~/.local/bin/sie`, runs `uv sync` + ruff gate + pytest), then cleans up. See `scripts/README.md` for the per-script reference.
 
 **Ruff gate**: deploy.sh aborts if `ruff check sie.py` fails after `ruff check --fix`. Pre-lint in-sandbox before delivering.
 
@@ -89,7 +87,7 @@ Dev dependencies (pytest, ruff) are in `pyproject.toml`'s `[project.optional-dep
 
 ## Cognitive-complexity reduction passes (v1.0.0 + v1.1.0)
 
-`render_markdown`, `parse_local_export`, `discover_repo`, `export_url`, and `_print_summary_stdout` were refactored to bring their cognitive complexity under the S3776 threshold (15) by extracting helpers. See `code-quality-SKILL.md` for the reduction techniques and the v1.0.0/v1.1.0 helper lists.
+`render_markdown`, `parse_local_export`, `discover_repo`, `export_url`, and `_print_summary_stdout` were refactored to bring their cognitive complexity under the S3776 threshold (15) by extracting helpers. See `skills/code-quality/SKILL.md` for the reduction techniques and the v1.0.0/v1.1.0 helper lists.
 
 ## GitHub CodeQL `py/incomplete-url-substring-sanitization` (fixed v1.0.0)
 

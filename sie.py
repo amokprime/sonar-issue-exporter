@@ -842,7 +842,7 @@ def _process_category_dir(
 def parse_local_export(folder: Path) -> tuple[list[dict], dict[str, dict]]:
     """Walk a local export folder and collect issues + rule metadata.
 
-    Expected layout (per sonarqube-workflow-SKILL.md + 0.2.x
+    Expected layout (per skills/sonarqube-workflow/SKILL.md + 0.2.x
     export_sonar_issue.py)::
 
         <folder>/
@@ -2465,7 +2465,7 @@ def _looks_like_issues_folder(path: Path) -> bool:
 
     Heuristic: has at least one subdirectory containing an ``L*.json`` file
     (matching ``ISSUE_FILE_RE``). This is the shape documented in
-    ``sonarqube-workflow-SKILL.md``: ``<folder>/<category>/L{line}.json``.
+    ``skills/sonarqube-workflow/SKILL.md``: ``<folder>/<category>/L{line}.json``.
     """
     if not path.is_dir():
         return False

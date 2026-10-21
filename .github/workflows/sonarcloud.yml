@@ -48,3 +48,5 @@ jobs:
             -Dsonar.projectKey=amokprime_sonar-issue-exporter
             -Dsonar.organization=amokprime
             -Dsonar.scm.provider=git
+            -Dsonar.exclusions=archive/**,tests/**,scripts/**,skills/**,docs/**,ai/**,.omp/**
+            -Dsonar.coverage.exclusions=sie.py,archive/**,tests/**,scripts/**,skills/**,docs/**,ai/**,.omp/**

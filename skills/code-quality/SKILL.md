@@ -1,0 +1,192 @@
+---
+name: code-quality
+description: Proactively avoid code quality issues and silent regressions in the sonar-issue-exporter Python script (sie.py) and the bash delivery scripts. Use this skill whenever writing or modifying Python in sie.py, especially when adding new input forms, changing URL parsing, modifying the Markdown renderer, or extending the test suite. Also use when writing or modifying the delivery scripts (deploy.sh, unpack.sh, prepare.sh). Also use when the user mentions SonarQube, cognitive complexity, S3776, S5713, code smells, ruff, or when reviewing code for potential regressions. This skill prevents issues before they reach SonarCloud scans.
+---
+Documents the code quality patterns that SonarCloud has flagged in this project and the silent regressions that occurred during development. Following these rules proactively prevents issues rather than fixing them after SonarCloud flags them.
+
+---
+Cognitive Complexity (S3776) — threshold 15
+
+The maximum allowed cognitive complexity per function is 15. SonarCloud evaluates each function independently.
+
+Primary reduction techniques, in order of preference:
+
+1. Extract helper functions — method calls are free in CC calculation.
+2. Early returns — process exceptional cases first and return, reducing nesting depth.
+3. Extract complex conditions — `if is_supported_url(raw):` instead of `if raw.startswith("http://") or raw.startswith("https://"):` — inline `or` chains add +1 per operator change.
+4. Dispatch tables — when a function is a long chain of `if` branches keyed on the same value, convert to a dict lookup. `sie.py`'s `resolve_input` uses this pattern implicitly (URL vs fuzzy vs path), though it's structured as early-returns rather than a table because each branch needs different pre-processing.
+
+CC accounting in SonarCloud:
+- `if`, `else if`, `else`: +1 each
+- `for`, `while`: +1 each
+- `&&`, `||`: +1 for each change of operator in a condition
+- `? :` ternary: +1
+- Nesting adds +1 per level for `if`/`for`/`while`/`catch`
+- Method calls: 0 (free) — this is why extraction works
+
+When `sie.py`'s `main()` or any helper grows past ~15 cognitive complexity (S3776) or ~10 mccabe complexity (C901), extract a helper rather than letting it bloat. The test suite (`tests/test_cli.py`, `tests/test_markdown_render.py`) will catch behavior regressions on the extracted helper.
+
+The v1.0.0 refactor extracted these helpers from `render_markdown` (was CC 30 / mccabe 30) to bring it under both thresholds: `_scope_display`, `_render_header`, `_render_focal_issue`, `_compute_facets`, `_render_summary_section`, `_render_why_section`, `_render_how_section`, `_render_instances_table`, `_render_per_rule_section`, `_render_per_rule_sections`. Each helper renders one section of the report; `render_markdown` itself is now a ~10-line composition root. The same pattern was applied to `parse_local_export` (`_parse_issue_from_json`, `_register_rule_metadata`) and `discover_repo` (`_discover_from_package_json`, `_discover_from_pyproject`, `_discover_from_git_remote`). Follow this pattern when future growth pushes another function over threshold — extract, don't bloat.
+
+The v1.1.0 CodeQL auto-discovery feature followed the same pattern: `export_url` would have grown past CC 15 with the new CodeQL fetch + three-way render dispatch, so two helpers were extracted: `_fetch_code_scanning_for_project` (silent-drop repo-wide alert fetch + SonarCloud-push dedup) and `_render_export_markdown` (three-way dispatch: both / sonar-only / codeql-only / empty). The combined renderer `render_combined_markdown` itself is split into `_render_combined_header` (project-level header with per-source counts) and `_render_combined_source_section` (one `## <Source>` heading + demoted body), each well under threshold.
+
+---
+Redundant exception class (S5713)
+
+`except (OSError, PermissionError)` is redundant — `PermissionError` is a subclass of `OSError`. Drop the subclass:
+
+```python
+# Wrong:
+except (OSError, PermissionError):
+    ...
+
+# Right:
+except OSError:
+    ...
+```
+
+The 0.2.x `export_sonar_issue.py` had this exact finding at line 96 (per `archive/0.2.0/issues/`); the 1.0.0 `sie.py` was written to avoid it from the start. Don't reintroduce.
+
+---
+Mutable default arguments (S5712)
+
+Python evaluates default arguments once at function definition time, not at call time. Mutable defaults (`[]`, `{}`, `set()`) shared across calls cause spooky-action-at-a-distance bugs.
+
+```python
+# Wrong:
+def add_issue(issue, rules={}):
+    rules[issue["rule"]] = issue
+    return rules
+
+# Right:
+def add_issue(issue, rules=None):
+    if rules is None:
+        rules = {}
+    rules[issue["rule"]] = issue
+    return rules
+```
+
+`sie.py` uses module-level constants (`SEVERITY_ORDER`, `KEEP_FIELDS`, `DEFAULT_INCLUDES`) instead of mutable defaults — these are read-only by convention and never mutated.
+
+---
+Field ordering (KEEP_FIELDS)
+
+The `KEEP_FIELDS` tuple controls the displayed field order for issue JSON in the Markdown output: `rule, component, line, textRange, message, severity, type, cleanCodeAttribute, cleanCodeAttributeCategory, impacts, flows`. This order is part of the documented output contract (per `archive/0.1.2/0.1.2.md` — "identity → location → description → classification → evidence").
+
+Don't reorder without reason. The order makes the per-issue JSON scannable: 9 one-liner values come first, then the multi-line arrays (`impacts`, `flows`) at the end where they don't push quick-scan info off screen.
+
+`key` is intentionally NOT in `KEEP_FIELDS` — it's added after the filter in local migration (real key from disk if present, else a `local:` synthetic key). For fresh API fetches, `key` is added by the renderer directly from the API response.
+
+---
+HTML stripping for rule descriptions
+
+`sie.py` uses a crude stdlib-only HTML stripper (`_strip_html`) instead of `html2text`. SonarCloud rule descriptions are simple HTML (p, code, a, strong, br) — the stripper handles these adequately. The 0.2.x code had `html2text` as an optional dependency; the 1.0.0 refactor dropped it to keep the script zero-dep.
+
+If a specific rule's description renders incorrectly, the fix is to extend `_strip_html` (e.g. handle a new tag), not to add `html2text` back. Don't reach for a third-party dep when a stdlib extension works.
+
+---
+URL parsing — preserve extra params
+
+`sie.parse_url_input` must preserve all query params from SonarCloud UI URLs through to the API URL — `sinceLeakPeriod`, `rules`, `tags`, etc. The 1.0.0 refactor had a bug where the initial implementation dropped these; the test `test_ui_url_preserves_extra_params` (in `tests/test_url_parsing.py`) catches this regression. When modifying `parse_url_input`, run that test specifically: `pytest tests/test_url_parsing.py -k "extra_params" -v`.
+
+The mapping is: UI `?id=<PROJECT>` becomes API `?componentKeys=<PROJECT>` (renamed); UI `?open=<KEY>` becomes the `focal_key` descriptor field (consumed, not passed through); everything else passes through verbatim.
+
+---
+GitHub URL — branch names with slashes
+
+GitHub branch names can contain slashes (e.g. `feature/sync-rewrite`). The `/tree/<branch>` URL form preserves the full branch name across the slash; the `/blob/<branch>/<path>` form has only one segment after `/blob/` as the branch (the rest is the file path). `sie.parse_github_url` handles these differently — `tree` joins everything after `/tree/`, `blob` takes only the first segment. The test `test_branch_with_slashes_in_name` covers this. When modifying GitHub URL handling, run: `pytest tests/test_github_url.py -v`.
+
+---
+Local-path disambiguation
+
+`sie.main()` treats a single path-like positional as the OUTPUT path (with input defaulting to main of CWD's repo), NOT as a migration input. Local-folder migration requires `--migrate`. This was the v1.0.0 disambiguation refactor.
+
+`resolve_input()` explicitly raises `ValueError` on path-like inputs — this is intentional. The CLI layer catches path-like positionals BEFORE calling `resolve_input`. If you find yourself adding a path-like branch to `resolve_input`, stop — that's the bug the refactor removed. Use the CLI layer instead.
+
+---
+Bash script patterns
+
+The scripts in `scripts/` and `skills/delivery/scripts/` are bash. The same patterns apply to all of them:
+
+- Strict mode: `set -euo pipefail` (the `-o pipefail` catches mid-pipe failures; the upload scripts don't pipe, but the delivery scripts do — `unzip -l | awk`, `find ... | while read`). Any failing command aborts before the destructive install step.
+- Empty-variable guards: every `rm` with a variable path uses `${var:?}` (ShellCheck SC2115). `deploy.sh`'s cleanup loop and `unpack.sh`'s `cleanup()` trap both follow this.
+- Braceless compounds: avoid `[ cond ] && exit` — use `if [ cond ]; then ...; fi` with an explicit `exit 1` and stderr message.
+- Diagnostics and exit codes: error messages go to stderr (`echo "..." >&2`), and every `exit` carries an explicit status.
+- Config over constants: paths derive from `$HOME` + `SONAR_ISSUE_EXPORTER_ROOT` + `XDG_BIN_HOME` (with `~/.local/bin` fallback), not hardcoded `/home/user/...`.
+- Cleanup scoping: `deploy.sh`'s collision-cleanup reads a `.deliver-files.list` manifest (written by `unpack.sh` before extraction) and removes only those files. Never use `find . -maxdepth 1 -type f` for the cleanup — it sweeps pre-existing files in `scratch/` (scratch.md notes, prior session zips).
+- `--no-build` for S8541: SonarCloud's `shell:S8541` flags `uv run` and `uv sync` commands that omit `--no-build` (build-script execution risk from compromised source distributions).
+    - The fix in `deploy.sh`: `uv sync --no-install-project --no-build --extra dev` (`--no-build` prevents building source distributions, `--no-install-project` is required because the project itself is an editable source distribution that would need building; tests use `import sie` via `conftest.py`'s `sys.path.insert`, not via the installed package).
+    - Then run `.venv/bin/ruff` and `.venv/bin/pytest` directly — bypasses `uv run` entirely (S8541 only flags `uv run` / `pip install`, not direct binary execution).
+    - `--no-build` alone doesn't work for editable installs; `--only-binary :all:` is a pip flag, not a uv flag.
+
+Run `bash -n` on each script after any change to catch syntax errors. ShellCheck if available: `shellcheck skills/delivery/scripts/deploy.sh`. (Note: `bash -n` is required, not `sh -n` — these scripts use bash arrays and `mapfile`, which dash doesn't support.)
+
+---
+Shared lint gate (`skills/code-quality/scripts/lint_gate.sh`)
+
+The shared `lint_gate.sh` is sourced by both `prepare.sh` (sandbox-side, before zipping) and `deploy.sh` (user-side, after deploying files). It runs every linter that's installed and fails (exit 1) if any linter finds issues after autofix.
+
+Linters run (in order):
+1. Shellcheck — `*.sh` files (no autofix; blocking on findings). Resolves the binary from PATH, then `.venv/bin/shellcheck`. Skipped if not installed.
+2. Ruff — `*.py` files (autofix via `ruff check --fix`, then gate via `ruff check`). Resolves the binary from PATH, then `~/.local/bin/ruff`, then `.venv/bin/ruff`. Skipped if not installed.
+
+Each linter is skipped if not installed or if no matching files exist. The gate is blocking: if any installed linter finds issues after autofix, `run_lint_gate` returns 1 (and the caller exits).
+
+Usage (source this file, then call `run_lint_gate`):
+```bash
+. skills/code-quality/scripts/lint_gate.sh
+run_lint_gate "$TARGET_DIR" [<changed_files...>]
+```
+
+- `target_dir`: the directory to lint (repo root or `download/`)
+- `changed_files`: optional, absolute paths of specific files changed this deploy. If provided, the gate lints ONLY these files (not the full target_dir depth-0 scan). If not provided, falls back to the find-based depth-0 scan.
+
+To manually re-run the gate (e.g. when iterating on a script without going through `prepare.sh`):
+```bash
+. skills/code-quality/scripts/lint_gate.sh && run_lint_gate .
+```
+
+---
+SonarCloud exclusion coverage (`check_sonar_exclusions`)
+
+`lint_gate.sh` also defines `check_sonar_exclusions`, a NON-blocking reminder. It reads `.github/workflows/sonarcloud.yml`, parses the `Dsonar.exclusions` and `Dsonar.coverage.exclusions` lists, then warns when a deployed repo-relative path is in neither list, so that you add the entry in the same commit instead of a follow-up one.
+
+Usage:
+```bash
+. skills/code-quality/scripts/lint_gate.sh
+check_sonar_exclusions "$REPO_ROOT" <rel_path...>
+```
+
+- `repo_root`: the repo to read `.github/workflows/sonarcloud.yml` from.
+- `rel_path...`: repo-relative paths of the files deployed this run. `deploy.sh` passes its `changed[]` and `manual_deploys[]` arrays. This differs from LineByLine's version, which parses static `deploy_file` mappings from the session `deploy.sh` — SIE has no mapping table (paths are decoded from `__`-flat zip names at runtime).
+
+Behavior:
+- Matching: exact string match, plus prefix match for patterns that end in `/**` (e.g. `docs/**` covers `docs/input-forms.md`).
+- Covered paths are silent. Uncovered paths are split into two groups:
+    - Coverage-counted code (`.py`, `.pyi`, JS/TS families, `.vue`) → warning. These are the only paths where an exclusion entry or a missing test changes the outcome. The message offers both fixes: add tests, or add the path to `Dsonar.exclusions` / `Dsonar.coverage.exclusions`.
+    - Everything else (YAML, shell, Markdown, TOML, lockfiles, extension-less files) → one summary block, no action. These types carry no coverage lines, so an exclusion buys nothing and only hides findings.
+- Skips silently when no paths are passed, or when the workflow file is missing or has no exclusion keys.
+- Never returns non-zero — it is a reminder, not a gate.
+
+Two deliberate differences from LineByLine:
+- Workflow YAML is left uncovered on purpose in this repo. It is analyzed (ncloc > 0, `lines_to_cover` absent), so it cannot trip an uncovered-code blocker, and the analysis finds real, fixable security issues such as unpinned action SHAs. Do not add `.github/**` to the exclusions.
+- `sie.py` sits in `Dsonar.coverage.exclusions`, which removes it from coverage metrics only — analysis (code smells, security) still runs. That entry is not a "this source does not matter" decision; it reflects that this repo imports no coverage report (no `pytest-cov`, no `sonar.python.coverage.reportPaths`), so measured coverage would read 0.0% everywhere. The project's quality gate (`issue-exporter`) has no coverage condition, so this has no gate effect either way. To make coverage meaningful, add `pytest-cov` + `--cov-report=xml`, pass `-Dsonar.python.coverage.reportPaths=coverage.xml`, then drop `sie.py` from the coverage exclusions.
+
+---
+Pre-delivery code quality checklist
+
+Before delivering any patch to `sie.py`, verify:
+
+1. CC of modified functions — estimate the cognitive complexity of any function you changed. If it exceeds 15, extract helpers or use early returns before delivering.
+2. Redundant exception class — check every `except` tuple in the patch for parent/child redundancy.
+3. Mutable default args — check every function signature in the patch for `={}` or `=[]` defaults.
+4. Field ordering — if the patch touches `KEEP_FIELDS` or the renderer, verify the output contract is preserved. Run `pytest tests/test_markdown_render.py`.
+5. URL parsing — if the patch touches `parse_url_input` or `parse_github_url`, run the full `tests/test_url_parsing.py` and `tests/test_github_url.py` suites. The extra-params and branch-slash cases are the most regression-prone.
+6. CLI disambiguation — if the patch touches `main()`, run `tests/test_cli.py`. The disambiguation logic is subtle — the tests are the spec.
+7. Local migration — if the patch touches `parse_local_export`, run `tests/test_local_migration.py`. The `local:` prefix and `Lunknown` handling have specific tests.
+8. Lint — `uv run ruff check --fix sie.py` (autofix safe violations) followed by `uv run ruff check sie.py` (gate — zero findings required). The rule set is configured in `pyproject.toml` `[tool.ruff.lint] select = ["E","W","F","I","C90","UP","B"]` — pycodestyle, pyflakes, isort, mccabe complexity (C901, default threshold 10), pyupgrade, flake8-bugbear. C901 (mccabe) and SonarCloud's S3776 (cognitive, threshold 15) measure different things — both are intentionally enabled; a function that exceeds EITHER metric warrants a refactor. The deploy pipeline runs the shared lint gate (Shellcheck + Ruff via `skills/code-quality/scripts/lint_gate.sh`), so pre-linting in-sandbox avoids the gate failing on the user's machine.
+
+For `skills/delivery/scripts/deploy.sh` (and the other delivery scripts):
+1. `bash -n skills/delivery/scripts/deploy.sh` (syntax check — must be `bash -n`, not `sh -n`, because the scripts use bash arrays + `mapfile`)
+2. `shellcheck skills/delivery/scripts/deploy.sh` if available
+3. The deploy pipeline is idempotent — re-running `scripts/unpack.sh` on an already-deployed state should be a no-op (the `cmp -s` byte-identical check skips unchanged files, and `uv sync` is a no-op when `pyproject.toml` hasn't changed).

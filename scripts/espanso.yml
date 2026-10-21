@@ -1,0 +1,45 @@
+# ~/.config/espanso/match/sonar-issue-exporter.yml
+# Pointer-based context loading. Skills auto-load via
+# skills/delivery/scripts/setup-sandbox.sh (in the chat.z.ai
+# sandbox) or .omp/skills/ symlinks (in the OMP harness); snippets only
+# list non-skill context files. Hardlink to scripts/espanso.yml to keep
+# both copies in sync:
+#   ln ~/.config/espanso/match/sonar-issue-exporter.yml scripts/espanso.yml
+matches:
+  - trigger: ":scm"
+    replace: |
+      Clone the main branch of my repo, https://github.com/amokprime/sonar-issue-exporter. Then read and run `bash skills/delivery/scripts/setup-sandbox.sh` from the repo folder — this installs the project skills into the sandbox's available_skills so their descriptions auto-load (invoke via `Skill(command="name")` instead of Read). Then read these from the repo folder:
+      ```
+      README.md
+      AGENTS.md
+      MEMORY.md
+      pyproject.toml
+      skills/delivery/scripts/prepare.sh
+      skills/delivery/scripts/deploy.sh
+      skills/delivery/scripts/setup-sandbox.sh
+      scripts/unpack.sh
+      ```
+      Use Glob/Grep to locate files instead of LS on the repo root. Use subagents (Task tool, Explore type) to read heavy folders in parallel — for sie.py specifically, use Grep to find functions (def parse_url_input, def render_markdown, def main, def export_url) and read only those ranges, not the whole ~2800-line file.
+  - trigger: ":sco"
+    replace: |
+      Read these from the `sonar-issue-exporter/` repo folder:
+      ```
+      MEMORY.md (if not already read at Onboard)
+      sie.py (use Grep to find functions: def parse_url_input, def render_markdown, def main, def export_url, def fetch_open_code_scanning_alerts, def render_combined_markdown — read only the ranges you need, not the whole ~2800-line file)
+      tests/ (read only the files matching the patched code — use Grep to find test files by function name)
+      pyproject.toml (for ruff rule set + dev deps)
+      docs/ (only the doc matching the area being patched — e.g. docs/output-paths.md for output-path changes, docs/auth-boundary.md for token behavior)
+      ```
+      Use subagents (Task tool, Explore type) to read tests/ in parallel when the patch spans multiple test files.
+  - trigger: ":ssk"
+    replace: |
+      Read these from the `sonar-issue-exporter/` repo folder (Skills meta-session — work on agent scaffolding):
+      ```
+      CONTRIBUTING.md
+      MEMORY.md
+      skills/ except skills/sonar-issue-exporter/SKILL.md (auto-loaded — invoke via Skill(command="sonar-issue-exporter") when needed, don't Read it)
+      scripts/
+      ai/ except ai/templates/
+      .omp/ (AGENTS.md, RULES.md, config.yml — the OMP harness scaffolding)
+      ```
+      (Historical transcripts are at `archive/<version>/` — read those if directly relevant to the meta-work being done. Per-version folders hold all session types.)

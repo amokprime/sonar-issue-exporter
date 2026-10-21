@@ -1,11 +1,10 @@
-# Contributing to sonar-issue-exporter
-
-This repo was vibe-coded with web chat AI agents ([DeepSeek](https://chat.deepseek.com/) and [Z.ai](https://chat.z.ai/)). The agent-facing workflow lives in `ai/chat.z.ai/`. If you're a human contributor (rare for this project, but welcome), the sections below cover the dev setup and the web chat deploy pipeline.
-
-## Development setup
-
-The `tests/` directory contains a pytest suite (~118 specs) covering URL parsing, GitHub URL mapping, fuzzy input resolution, local-folder migration, CLI disambiguation, output path resolution, Markdown rendering, and clean-mode suppression. Pure unit tests — no network calls, so they run in <1s.
-
+## Contributing to sonar-issue-exporter
+This repo was vibe-coded with free web chat AI agents ([DeepSeek](https://chat.deepseek.com/) and [Z.ai](https://chat.z.ai/)). The chat.z.ai agent-facing workflow lives in three files:
+- `skills/sonar-issue-exporter/SKILL.md` covers onboarding and workflow. The agent invokes it via `Skill(command="sonar-issue-exporter")`. 
+- `skills/delivery/SKILL.md` covers web-channel rules and delivery workflow. The agent invokes it via `Skill(command="delivery")`. 
+- `AGENTS.md` is a root-level minimal pointer. If you're a human contributor (rare for this project, but welcome), the sections below cover the dev setup and the web chat deploy pipeline.
+### Development setup
+The `tests/` directory contains a pytest suite (~182 specs). The suite covers URL parsing, GitHub URL mapping, fuzzy input resolution, local-folder migration, CLI disambiguation, output path resolution, Markdown rendering, and clean-mode suppression. Pure unit tests — no network calls, so they run in <1s.
 ```sh
 # Clone the repo
 git clone https://github.com/amokprime/sonar-issue-exporter.git
@@ -20,19 +19,18 @@ uv run pytest tests/test_url_parsing.py -v   # single file
 uv run pytest tests/ -k "clean" -v          # by keyword
 ```
 
-**Why `uv sync` is the right approach**: `uv sync` is idempotent — if `.venv/` exists and `pyproject.toml` hasn't changed, it's a no-op. If deps changed (e.g. a new test file imports a new helper) or `.venv/` was deleted, it recreates the venv with the exact deps from `pyproject.toml`'s `[project.optional-dependencies] dev = [...]`. This is preferable to `pip install -e ".[dev]"` because `uv` resolves and locks deps faster, and `uv run` ensures the right Python interpreter is used without manual activation.
+**Why `uv sync` is the right approach**: `uv sync` is idempotent — if `.venv/` exists and `pyproject.toml` hasn't changed, it's a no-op. If deps changed (e.g. a new test file imports a new helper) or `.venv/` was deleted, it recreates the venv. The venv uses the exact deps from `pyproject.toml`'s `[project.optional-dependencies] dev = [...]`. This is preferable to `pip install -e ".[dev]"` because `uv` resolves and locks deps faster, and `uv run` ensures the right Python interpreter is used without manual activation.
 
 Lint with ruff (also in `.venv/`):
-
 ```sh
 uv run ruff check --fix sie.py      # autofix safe violations
 uv run ruff check sie.py            # gate — fails on any remaining violation
 ```
 
-The rule set is `E,W,F,I,C90,UP,B` — pycodestyle, pyflakes, isort, mccabe complexity (C901, threshold 10), pyupgrade, flake8-bugbear. C901 (mccabe) and SonarCloud's S3776 (cognitive, threshold 15) measure different things — both are intentionally enabled; a function that exceeds EITHER metric warrants a refactor.
+The rule set is `E,W,F,I,C90,UP,B` — pycodestyle, pyflakes, isort, mccabe complexity (C901, threshold 10), pyupgrade, flake8-bugbear. C901 (mccabe) and SonarCloud's S3776 (cognitive, threshold 15) measure different things — both are intentionally enabled. A function that exceeds EITHER metric warrants a refactor.
 
 See [tests/README.md](https://github.com/amokprime/sonar-issue-exporter/tree/main/tests/README.md) for the file-by-file coverage map and design notes. 
 
-See [ai/chat.z.ai/scripts/README.md](https://github.com/amokprime/sonar-issue-exporter/tree/main/ai/chat.z.ai/scripts/README.md) for a web chat deployment pipeline featuring chat.z.ai.
+See [scripts/README.md](https://github.com/amokprime/sonar-issue-exporter/tree/main/scripts/README.md) for a web chat deployment pipeline featuring chat.z.ai.
 
-See [ai/chat.z.ai/AGENTS.md](https://github.com/amokprime/sonar-issue-exporter/tree/main/ai/chat.z.ai/AGENTS.md) for the agent-facing dev workflow.
+See [AGENTS.md](https://github.com/amokprime/sonar-issue-exporter/tree/main/AGENTS.md) for the agent-facing dev workflow.

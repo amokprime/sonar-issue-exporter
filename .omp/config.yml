@@ -1,0 +1,4 @@
+memory:
+  backend: Sharpshooter
+autolearn:
+  enabled: true
